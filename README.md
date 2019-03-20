@@ -7,13 +7,8 @@ PART 1 - Getting Started
 
 ## Requirements
 
-The artifact requires a Linux based multi-core machine (ideally 16
-cores and greater) with at least 64GB of RAM. We have tested it on
-Ubuntu 14.04 and 16.04. The artifact requires about 3 GB of disk space
-during execution.
-
-TaskProf relies on hardware support for performance counters. To
-access the performance counters, TaskProf must be executed directly on
+TaskProf2 relies on hardware support for performance counters. To
+access the performance counters, TaskProf2 must be executed directly on
 the machine and not through a VM. Currently available VMs cannot
 access the host machine's performance counters. The build script that
 we provide for installation, checks if the machine supports hardware
@@ -26,9 +21,11 @@ If the output is "Performance Events: Unsupported...", then the
 machine does not support performance counters and TaskProf cannot be
 executed on the machine.
 
+We have tested TaskProf2 on Linux machines running Ubuntu 14.04 and 16.04.
+
 ## Installation
 
-We use <ART_ROOT> to refer to the base directory of the artifact.
+We use <ART_ROOT> to refer to the base directory of this repository.
 
 Install perf. On Ubuntu, the following command can be used to install
 perf.
@@ -39,35 +36,35 @@ We had to extend the TBB library to enable measurement of performance
 counter events. We provide two version of the TBB library. (1) TBB
 without TaskProf extensions to measure running time and speedup, and
 (2) TBB with TaskProf extensions for profiling. Install each version
-in **separate shell**
+in a **separate shell**
 
 Install TBB without TaskProf
 
 	cd <ART_ROOT>
 	source build_orig_tbb.sh
 
-In separate shell, install TBB and TaskProf
+In a separate shell, install TBB and TaskProf2
 
         cd <ART_ROOT>
         source build_tprof.sh	
 	
 ## Usage
 
-We demonstrate how to use TaskProf with test programs. First, we show
-how to TaskProf's what-if analyses to identify serialization
+We demonstrate how to use TaskProf2 with test programs. First, we show
+how to TaskProf2's what-if analyses to identify serialization/scalability
 bottlenecks and regions that must be optimized to increase
-parallelism. Next, we show how TaskProf identifies spawn sites with
+parallelism. Next, we show how TaskProf2 identifies spawn sites with
 high task creation overheads. Finally, we show how to identify
-secondary effects using TaskProf's differential analyses.
+secondary effects using TaskProf2's differential analyses.
 
 ## What-if analyses
 
-We demonstrate TaskProf's what-if analyses using the "primes" example.
+We demonstrate TaskProf2's what-if analyses using the "primes" example.
 
        cd <ART_ROOT>/tests/primes
 
 First, measure the speedup of the primes program (on the shell with TBB
-without TaskProf extensions)
+without TaskProf2 extensions)
 
        cd orig
        make
@@ -79,7 +76,7 @@ Run serial program and then task based program
 
 Expected speedup is 2.89X.
 
-Next, run the primes program with TaskProf(On shell with TBB with TaskProf).
+Next, run the primes program with TaskProf2(On shell with TBB with TaskProf2).
 
       cd <ART_ROOT>/tests/primes/tprof
       make
@@ -96,7 +93,7 @@ parallelism of the program should be around 2.9.
 
 The what_if_regions.csv file specifies the regions that must be
 optimized to increase the parallelism in the program. For the primes
-program, TaskProf specifies the region between lines 32 and 47 in
+program, TaskProf2 specifies the region between lines 32 and 47 in
 detect_primes_tasks.cpp file. To optimize this region re-run the
 program with reduced grain size.
 
@@ -105,15 +102,15 @@ program with reduced grain size.
 
 The parallelism in parallelism_profile.csv has increased to 216.3.
 
-Similarly, the speedup of the program on TBB without TaskProf shell
+Similarly, the speedup of the program on TBB without TaskProf2 shell
 would have increased 3.85X to after executing,
 
 	time ./detect_primes_tasks 0 10000000 10000
 
 ## Task creation overhead
 
-We demonstrate how TaskProf highlights task creation overheads using a
-test program. In the shell with TaskProf
+We demonstrate how TaskProf2 highlights task creation overheads using a
+test program. In the shell with TaskProf2
 
         cd <ART_ROOT>/tests/sched_overhead/
 	make
@@ -137,9 +134,9 @@ reduced from 87% to 4%.
 
 ## Secondary effects
 
-We demonstrate TaskProf's differential analyses to identify secondary
+We demonstrate TaskProf2's differential analyses to identify secondary
 effects using an example that has false sharing. First, measure the
-speedup of the program in the shell for TBB without TaskProf.
+speedup of the program in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/tests/false_sharing/orig
 	make
@@ -147,7 +144,7 @@ speedup of the program in the shell for TBB without TaskProf.
 	time ./par_small_array
 
 The parallel program should run slower than the serial program. Now in
-the shell will TBB with TaskProf, run the differential analyses
+the shell will TBB with TaskProf2, run the differential analyses
 profiler.
 
 The differential analyses profiler is a python script located in
@@ -174,7 +171,7 @@ The diff_profile.csv does not show inflation in cycles, and negligible
 inflation in other counters.
 
 Next, measure the speedup after fixing the false sharing in the shell
-with TBB without TaskProf.
+with TBB without TaskProf2.
 
         time ./par_small_array_padded
 
@@ -183,18 +180,18 @@ This should show a speedup of almost 16X over the serial execution.
 PART 2 - Step-by-step Instructions
 ----------------------------------
 
-In this section, we will demonstrate how to use TaskProf on all of the
+In this section, we will demonstrate how to use TaskProf2 on all of the
 case studies described in the paper. The applications used in the case
 studies are provided in the "benchmarks" directory. Please maintain
-two shells, one with TBB without TaskProf extensions for speedup
-measurements, and other with TBB and TaskProf for profiling. For each
+two shells, one with TBB without TaskProf2 extensions for speedup
+measurements, and other with TBB and TaskProf2 for profiling. For each
 application, we provide two versions, (1) the original program, (2)
-the program after optimizing the regions we found with TaskProf.
+the program after optimizing the regions we found with TaskProf2.
 
 ## MILCmk
 
 Measure the initial speedup of original MILCmk program in the shell
-with TBB without TaskProf Extensions.
+with TBB without TaskProf2 Extensions.
 
 	 cd <ART_ROOT>/benchmarks/MILCmk/orig/MILCmk
 	 source run.sh
@@ -205,7 +202,7 @@ speedup of the parallel execution over the serial execution should be
 around 2.2X.
 
 We provide a script that will execute both the what-if analyses and
-differential analysis on the program. In the shell with TaskProf and
+differential analysis on the program. In the shell with TaskProf2 and
 TBB,
 
 	cd <ART_ROOT>/benchmarks/MILCmk/tprof/MILCmk
@@ -230,12 +227,12 @@ the optimized code in,
     	cd <ART_ROOT>/benchmarks/MILCmk/orig/optimized
 
 Measure the speedup after optimization by executing the run.sh shell
-script in the shell with TBB without TaskProf.
+script in the shell with TBB without TaskProf2.
 
 	source run.sh
 
 The speedup of the program should increase to about 5.5X.
-The TaskProf profiles after optimization can be generated by,
+The TaskProf2 profiles after optimization can be generated by,
 
     	cd <ART_ROOT>/benchmarks/MILCmk/tprof/optimized
 	source run.sh
@@ -247,7 +244,7 @@ will also reduce.
 ## NBody
 
 Measure the initial speedup of the original NBody program in the shell
-for TBB without TaskProf Extensions. For the first run the input file
+for TBB without TaskProf2 Extensions. For the first run the input file
 has to be generated.
 
        	cd <ART_ROOT>/benchmarks/nbody/orig/nbody
@@ -261,7 +258,7 @@ speedup,
 
 The speedup of the program should be around 12.2X.
 
-In the shell with TBB for TaskProf, run the program with TaskProf's
+In the shell with TBB for TaskProf2, run the program with TaskProf2's
 what-if analyses. We provide a shell script.
 
 	cd <ART_ROOT>/benchmarks/nbody/tprof/nbody/parallelCK
@@ -290,14 +287,14 @@ The tasking overhead of the program should reduce.
 
 ## MinSpanningForest
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/minSpanningForest/orig/minSpanningForest/parallelKruskal
 	source generate_inputs.sh
 	source run.sh
 
 The initial speedup is around 6.4X. In the shell with TBB for
-TaskProf, run the program with TaskProf's what-if analyses
+TaskProf2, run the program with TaskProf2's what-if analyses
 
 	cd <ART_ROOT>/benchmarks/minSpanningForest/tprof/minSpanningForest/parallelKruskal
 	source generate_inputs.sh
@@ -320,13 +317,13 @@ The speedup after parallelization with increase to about 9X.
 
 ## Lulesh
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/lulesh/orig/lulesh
 	source run.sh
 
-The initial speedup is around 4.1X. Run TaskProf's differential
-analyses in the shell with TBB and TaskProf.
+The initial speedup is around 4.1X. Run TaskProf2's differential
+analyses in the shell with TBB and TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/lulesh/tprof/lulesh
 	source run.sh
@@ -342,7 +339,7 @@ lulesh.cc:2823
 lulesh.cc:2847
 
 To measure the speedup after optimization, in the shell for TBB
-without TaskProf, run,
+without TaskProf2, run,
 
 	cd <ART_ROOT>/benchmarks/lulesh/orig/optimized
 	source run.sh
@@ -352,13 +349,13 @@ effects.
 
 ## Swaptions
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/swaptions/orig/swaptions
 	source run.sh
 
-The initial speedup is around 11.5X. Next, run TaskProf's tasking
-overhead analyses in the shell for TBB with TaskProf.
+The initial speedup is around 11.5X. Next, run TaskProf2's tasking
+overhead analyses in the shell for TBB with TaskProf2.
 
 	 cd <ART_ROOT>/benchmarks/swaptions/tprof/swaptions
 	 source run.sh
@@ -369,7 +366,7 @@ HJM_SimPath_Forward_Blocking.cpp line 136 contributes almost all of
 the tasking overhead. The profile is similar to Figure 8 in the paper.
 
 To measure the speedup after optimization in the shell with TBB
-without TaskProf, run
+without TaskProf2, run
 
 	cd <ART_ROOT>/benchmarks/swaptions/orig/optimized
 	source run.sh
@@ -377,7 +374,7 @@ without TaskProf, run
 The speedup should increase to about 14X.
 
 To check if the optimization reduced the tasking overhead in the
-program, in the shell with TBB and TaskProf, run
+program, in the shell with TBB and TaskProf2, run
 
 	 cd <ART_ROOT>/benchmarks/swaptions/tprof/optimized
 	 source run.sh
@@ -387,14 +384,14 @@ paper.
 
 ## breadthFirstSearch
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/breadthFirstSearch/orig/bfs/deterministicBFS
 	source generate_inputs.sh
 	source run.sh
 
 The initial speedup is around 6.6X. Next run what-if analyses in the
-shell with TBB and TaskProf.
+shell with TBB and TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/breadthFirstSearch/tprof/bfs/deterministicBFS
 	source generate_inputs.sh
@@ -412,14 +409,14 @@ The speedup of the program increases to 8X after parallelization.
 
 ## SpanningForest
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/spanningForest/orig/spanningForest/incrementalST
 	source generate_inputs.sh
 	source run.sh
 
 The initial speedup is around 7X. Next run what-if analyses in the
-shell with TBB and TaskProf.
+shell with TBB and TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/spanningForest/tprof/spanningForest/incrementalST
 	source generate_inputs.sh
@@ -437,14 +434,14 @@ The speedup of the program increases to 8.2X after parallelization.
 
 ## suffixArray
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/suffixArray/orig/suffixArray/parallelKS
 	source generate_inputs.sh
 	source run.sh
 
 The initial speedup is around 2.1X. Next run what-if analyses in the
-shell with TBB and TaskProf.
+shell with TBB and TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/suffixArray/tprof/suffixArray/parallelKS
 	source generate_inputs.sh
@@ -462,14 +459,14 @@ The speedup of the program increases to about 6X after parallelization.
 
 ## comparisonSort
 
-Measure initial speedup in the shell for TBB without TaskProf.
+Measure initial speedup in the shell for TBB without TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/comparisonSort/orig/compSort/sampleSort
 	source generate_inputs.sh
 	source run.sh
 
 The initial speedup is around 4.9X. Next run what-if analyses in the
-shell with TBB and TaskProf.
+shell with TBB and TaskProf2.
 
 	cd <ART_ROOT>/benchmarks/comparisonSort/tprof/compSort/sampleSort
 	source generate_inputs.sh
