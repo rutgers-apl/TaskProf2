@@ -1,0 +1,5 @@
+NUM nodes = 14833457, sum depth = 166513948, sum seq num = 143214091
+AVG depth = 11
+MAX depth = 35
+AVG seq num = 9
+MAX seq num = 15520

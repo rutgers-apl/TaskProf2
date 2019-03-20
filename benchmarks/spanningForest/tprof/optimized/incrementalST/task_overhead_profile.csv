@@ -1,0 +1,20 @@
+Source file,Line number,Tasking Overhead Percent
+main,0,6.02916
+sequence.h,365,2.92411
+IO.h,180,2.42135
+IO.h,166,2.80184
+speculative_for.h,109,23.2334
+unionFind.h,38,0.311456
+sequence.h,224,2.20552
+sequence.h,296,16.5805
+sequence.h,299,17.2641
+IO.h,84,0.45344
+graphIO.h,172,0.307157
+sequence.h,380,0.315651
+IO.h,71,0.363213
+IO.h,154,2.46867
+speculative_for.h,82,24.4047
+sequence.h,227,2.54849
+graphIO.h,160,0.586841
+IO.h,101,0.376905
+STTime.C,52,0.432735

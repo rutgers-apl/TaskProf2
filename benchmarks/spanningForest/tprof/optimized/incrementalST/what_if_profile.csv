@@ -1,0 +1,20 @@
+Source file,Line number,Parallelism,Percent critical work
+main,0,191.294,1.58743
+sequence.h,365,52.0786,16.0881
+IO.h,180,58.4653,10.299
+IO.h,166,43.9347,14.54
+speculative_for.h,109,46.8849,31.9794
+unionFind.h,38,54.0598,0.984998
+sequence.h,224,48.7857,0.921497
+sequence.h,296,240.055,1.46141
+sequence.h,299,720.673,1.54888
+IO.h,84,5977.36,0.341808
+graphIO.h,172,55.981,3.67788
+sequence.h,380,57.8245,0.953884
+IO.h,71,6823.52,0.348414
+IO.h,154,38.4198,4.28654
+speculative_for.h,82,982.215,4.01343
+sequence.h,227,47.762,1.12962
+graphIO.h,160,6882.65,0.430085
+IO.h,101,3742.9,0.0995194
+STTime.C,52,2933.86,0.0766287

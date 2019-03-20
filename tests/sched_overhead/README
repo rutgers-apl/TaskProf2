@@ -1,0 +1,23 @@
+## Task creation overhead
+
+We demonstrate how TaskProf highlights task creation overheads using a
+test program. In the shell with TaskProf
+
+        cd <ART_ROOT>/tests/sched_overhead/
+	./test_task_creation 1
+	$TP_GENPROF/gentprof
+
+This generates the tasking overhead profile in the file
+task_overhead_profile.csv. The profile shows that the program has a
+high task creation overhead of 87% of the total useful work. Three
+spawn sites at lines 46,47 and 69 contribute almost all of the
+overhead at 35, 35, and 28 percent respectively.
+
+Now, let us reduce the task creation overhead by increasing the
+grainsize and generate the profile.
+
+        ./test_task_creation 512
+	$TP_GENPROF/gentprof
+
+In the task_overhead_profile.csv, the overall task creation overhead
+reduced from 87% to 4%.

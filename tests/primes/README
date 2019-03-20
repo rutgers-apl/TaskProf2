@@ -1,0 +1,51 @@
+This is an example to demonstrate how to improve the parallelism of a
+program with TaskProf.  The program takes a range of integers and
+returns the set of prime numbers within that range.  There are three
+implementations of the program in the "tests" folder. They are the
+serial implementation, parallel implementation using raw threads and
+parallel implementation using TBB.  The "tprof" folder contains the
+TBB implementation setup to run with TaskProf profiler.
+
+First, measure the speedup of the primes program (on the shell with TBB
+without TaskProf extensions)
+
+       cd orig
+       make
+
+Run serial program and then task based program
+
+       time ./detect_primes 0 10000000
+       time ./detect_primes_tasks 0 10000000 2500000
+
+Expected speedup is 2.89X.
+
+Next, run the primes program with TaskProf(On shell with TBB with TaskProf).
+
+       cd tprof
+       make
+       ./detect_primes_tasks 0 10000000 2500000
+
+Generate what-if regions and profile
+
+       $TP_GENPROF/gentprof
+
+This generates four csv files. The parallelism_profile.csv specifies
+the parallelism of the program(first line after headers) and the
+parallelism at each spawn site in the program(rest of the lines). The
+parallelism of the program should be around 2.9.
+
+The what_if_regions.csv file specifies the regions that must be
+optimized to increase the parallelism in the program. For the primes
+program, TaskProf specifies the region between lines 32 and 47 in
+detect_primes_tasks.cpp file. To optmize this region re-run the
+program with reduced grain size.
+
+        ./detect_primes_tasks 0 10000000 10000
+	$TP_GENPROF/gentprof
+
+The parallelism in parallelism_profile.csv has increased to 216.3.
+
+Similarly, the speedup of the program on TBB without TaskProf shell
+would have increased 3.85X to after executing,
+
+        time ./detect_primes_tasks 0 10000000 10000
