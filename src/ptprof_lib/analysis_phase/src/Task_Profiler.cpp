@@ -240,7 +240,7 @@ bool Task_Profiler::checkRecursiveCall(struct AFTask* node, size_t call_site) {
     return false;
   } else {
     struct AFTask* parent = taskGraph->getTask(node->parent);
-    if (parent->call_site == node->call_site) {
+    if (parent->call_site == call_site) {
       return true;
     } else {
       return checkRecursiveCall(parent, call_site);
