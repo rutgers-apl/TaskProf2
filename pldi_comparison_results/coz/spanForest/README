@@ -1,0 +1,8 @@
+We were unable to generate the end-to-end and throughput profiles for
+spanning forest, inspite of profiling the program with Coz over 50
+executions. We were able to generate the latency profile by adding
+latency progress points around a region in graphIO.h that we
+optimized.  The latency profile is shown in the file
+latency_profile.png. The profile shows that by optimizing line
+graphIO.h:172, which was in the loop we optimized, the program will
+slow down by almost 50%.
