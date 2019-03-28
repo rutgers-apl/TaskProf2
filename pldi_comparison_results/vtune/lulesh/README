@@ -1,0 +1,14 @@
+We profiled lulesh with Intel VTune amplifier and generated the
+initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The hotspots identified by VTune correspond to
+parallel for regions and task execute regions in the program and the
+profiler also indicates low parallelism. But increasing the
+parallelism of these regions did not speedup the program.
+
+The profile shows low microarchitechtural usage which can be
+attributed to secondary effects. A further micro architectural
+analysis (microarch_profile.png) shows that the program has good
+cycles per instruction and but is memory bound with high local DRAM
+latency. This was similar to the cause of secondary effect we
+diagnosed with TaskProf, but VTune does not show what region is
+causing the secondary effect.

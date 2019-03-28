@@ -1,0 +1,5 @@
+We profiled swaptions program with Intel VTune amplifier and generated
+the initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The profile highlights that the program has high
+scheduling overhead time but attributes them to TBB Scheduler Internal
+calls which are also shown as the hotspots in the program.

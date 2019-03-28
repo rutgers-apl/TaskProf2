@@ -1,0 +1,10 @@
+We profiled bfs program with Intel VTune amplifier and generated the
+initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The hotspots belonging to the bfs program
+correspond to parallel for regions in the program and were not the
+regions identified by TaskProf2.
+
+The profile shows low microarchitechtural usage which can be
+attributed to secondary effects. A further analysis micro
+architectural analysis (microarch_profile.png) shows that the program
+has high branch mispredictions.

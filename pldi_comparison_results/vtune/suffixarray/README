@@ -1,0 +1,17 @@
+We profiled spanningForest with Intel VTune amplifier and generated
+the initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The profile shows as hotspots a set of parallel
+for regions in the program which are the regions that are executing
+most frequently. Increasing the parallelism in these regions does not
+increase the speedup of the program.
+
+The profile also highlights that the program has high scheduling
+overhead time which is attributed to a parallel for call. Reducing the
+overhead of this region manually does not speedup the program.
+
+The profile shows low threading efficiency which is indicates low
+parallelism in the program. A further threading efficiency analysis
+(in threading_efficiency_profile.png) shows a low cpu utilization of
+9.2% and parallel for hotspots in the program causing low
+parallelism. These were not the regions that we identified with
+TaskProf.

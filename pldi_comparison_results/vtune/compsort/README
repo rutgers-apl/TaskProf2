@@ -1,0 +1,17 @@
+We profiled comparison with Intel VTune amplifier and generated the
+initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The profile shows the set of hotspots in the
+program which correspond parallel for calls in sequence.h and IO.h,
+and the quickSort function in quicksort.h. TaskProf identified regions
+in transpose.h.
+
+The profile also highlights that the program has high scheduling
+overhead time.
+
+The profile shows low microarchitechtural usage which can be
+attributed to secondary effects. A further micro architectural
+analysis (microarch_profile.png) shows that the program has secondary
+effects due to instruction cache misses and branch
+mispredictions. While this indicates that the program is experiencing
+secondary effects VTune does not show what are the specific regions
+causing secondary effects.

@@ -1,0 +1,16 @@
+We profiled minSpanningForest with Intel VTune amplifier and generated
+the initial hotspot profile. The profile is shown in the file
+hotspot_profile.png. The profile shows the set of hotspots in the
+program which correspond to parallel for regions and a serial function
+quicksort.
+
+The profile also highlights that the program has high scheduling
+overhead time and attributes it to a parallel for region. Reducing the
+overhead of this parallel for call does not speedup the program.
+
+The profile shows low microarchitechtural usage which can be
+attributed to secondary effects. A further micro architectural
+analysis (microarch_profile.png) shows that the program has high
+memory latency and branch mispredictions. While this indicates that
+the program is experiencing secondary effects VTune does not show what
+are the specific regions causing secondary effects.
