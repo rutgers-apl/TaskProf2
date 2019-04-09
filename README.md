@@ -1,6 +1,10 @@
-We present, TaskProf2, a profiler for identifying performance
-bottlenecks in task-based parallel programs written in C++ using Intel
-Threading Building Blocks library(TBB).
+TaskProf2 is a parallelism profiler and an adviser for task parallel
+programs that use the Intel Threading Building Blocks (TBB). As a
+parallelism profiler, it identifies regions with serialization
+bottlenecks, tasking overheads, and the secondary effects of
+execution. As an adviser, it automatically identifies a set of code
+regions that matter in improving parallelism with its what-if
+analyses.
 
 PART 1 - Getting Started
 ------------------------
@@ -20,6 +24,15 @@ hardware performance counters,
 If the output is "Performance Events: Unsupported...", then the
 machine does not support performance counters and TaskProf cannot be
 executed on the machine.
+
+Similarly, we recommend that you disable hyper-threading on the
+machine. You can execute the following command to check the number of
+threads per core,
+
+        lscpu | grep -i -E "^CPU(s):|core|socket"
+
+If the "Thread(s) per core" is greater than 1, then the machine has
+hyper-threading enabled and should be disabled on the machine.
 
 We have tested TaskProf2 on Linux machines running Ubuntu 14.04 and 16.04.
 
