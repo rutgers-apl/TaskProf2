@@ -1,6 +1,5 @@
-MIT License
-
-Copyright (c) 2019 Rutgers Architecture and Programming Languages (RAPL) Group
+Copyright (c) 2019 Adarsh Yoga and Santosh Nagarakatte, Rutgers The
+State University of New Jersey.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
