@@ -1,26 +1,35 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
+#if _MSC_VER==1500 && !__INTEL_COMPILER
+    // VS2008/VC9 has an issue in math.h
+    #pragma warning( push )
+    #pragma warning( disable: 4985 )
+#endif
 #include <cmath>
+#if _MSC_VER==1500 && !__INTEL_COMPILER
+    #pragma warning( pop )
+#endif
 #include "tbb/tbb_stddef.h"
 #include "harness.h"
+#include <vector>
 
 namespace test_partitioner_utils {
 
@@ -113,8 +122,7 @@ public:
         r.my_end = my_begin = middle;
     }
 
-    RangeBase(RangeBase& r, proportional_split& p)
-        : RangeStatisticCollector(r, p) {
+    RangeBase(RangeBase& r, proportional_split& p) : RangeStatisticCollector(r, p) {
         *this = r;
         size_t original_size = r.size();
         T right = self().compute_right_part(r, p);
@@ -339,6 +347,9 @@ public:
         visualize_node(m_root);
     }
 
+    bool operator ==(const BinaryTree& other_tree) const { return compare_nodes(m_root, other_tree.m_root); }
+    void fill_leafs(std::vector<TreeNode*>& leafs) const { fill_leafs_impl(m_root, leafs); }
+
 private:
     TreeNode *m_root;
 
@@ -423,6 +434,20 @@ private:
             visualize_node(node->m_left, indent + 1);
         if (node->m_right)
             visualize_node(node->m_right, indent + 1);
+    }
+
+    bool compare_nodes(TreeNode* node1, TreeNode* node2) const {
+        if (node1 == NULL && node2 == NULL) return true;
+        if (node1 == NULL || node2 == NULL) return false;
+        return are_nodes_equal(node1, node2) && compare_nodes(node1->m_left, node2->m_left)
+            && compare_nodes(node1->m_right, node2->m_right);
+    }
+
+    void fill_leafs_impl(TreeNode* node, std::vector<TreeNode*>& leafs) const {
+        if (node->m_left == NULL && node->m_right == NULL)
+            leafs.push_back(node);
+        if (node->m_left != NULL) fill_leafs_impl(node->m_left, leafs);
+        if (node->m_right != NULL) fill_leafs_impl(node->m_right, leafs);
     }
 };
 

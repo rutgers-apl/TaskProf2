@@ -1,25 +1,30 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
+
+#if __TBB_CPF_BUILD
+#define TBB_DEPRECATED_FLOW_NODE_EXTRACTION 1
+#endif
 
 #include "harness_graph.h"
 
+#include "tbb/flow_graph.h"
 #include "tbb/task_scheduler_init.h"
 #include "tbb/spin_rw_mutex.h"
 
@@ -52,13 +57,13 @@ struct parallel_put_until_limit : private NoAssign {
     }
 
 };
-     
-//! exercise buffered multifunction_node.  
+
+//! exercise buffered multifunction_node.
 template< typename InputType, typename OutputTuple, typename Body >
 void buffered_levels( size_t concurrency, Body body ) {
     typedef typename tbb::flow::tuple_element<0,OutputTuple>::type OutputType;
     // Do for lc = 1 to concurrency level
-    for ( size_t lc = 1; lc <= concurrency; ++lc ) { 
+    for ( size_t lc = 1; lc <= concurrency; ++lc ) {
         tbb::flow::graph g;
 
         // Set the execute_counter back to zero in the harness
@@ -70,7 +75,7 @@ void buffered_levels( size_t concurrency, Body body ) {
 
         // Create the function_node with the appropriate concurrency level, and use default buffering
         tbb::flow::multifunction_node< InputType, OutputTuple > exe_node( g, lc, body );
-   
+
         //Create a vector of identical exe_nodes
         std::vector< tbb::flow::multifunction_node< InputType, OutputTuple > > exe_vec(2, exe_node);
 
@@ -78,15 +83,19 @@ void buffered_levels( size_t concurrency, Body body ) {
         for (size_t node_idx=0; node_idx<exe_vec.size(); ++node_idx) {
             for (size_t num_receivers = 1; num_receivers <= MAX_NODES; ++num_receivers ) {
                 // Create num_receivers counting receivers and connect the exe_vec[node_idx] to them.
-                harness_mapped_receiver<OutputType> *receivers = new harness_mapped_receiver<OutputType>[num_receivers];
+                std::vector< harness_mapped_receiver<OutputType>* > receivers(num_receivers);
+                for (size_t i = 0; i < num_receivers; i++) {
+                    receivers[i] = new harness_mapped_receiver<OutputType>(g);
+                }
+
                 for (size_t r = 0; r < num_receivers; ++r ) {
-                    tbb::flow::make_edge( tbb::flow::output_port<0>(exe_vec[node_idx]), receivers[r] );
+                    tbb::flow::make_edge( tbb::flow::output_port<0>(exe_vec[node_idx]), *receivers[r] );
                 }
 
                 // Do the test with varying numbers of senders
                 harness_counting_sender<InputType> *senders = NULL;
                 for (size_t num_senders = 1; num_senders <= MAX_NODES; ++num_senders ) {
-                    // Create num_senders senders, set there message limit each to N, and connect them to the exe_vec[node_idx]
+                    // Create num_senders senders, set their message limit each to N, and connect them to the exe_vec[node_idx]
                     senders = new harness_counting_sender<InputType>[num_senders];
                     for (size_t s = 0; s < num_senders; ++s ) {
                         senders[s].my_limit = N;
@@ -95,37 +104,40 @@ void buffered_levels( size_t concurrency, Body body ) {
 
                     // Initialize the receivers so they know how many senders and messages to check for
                     for (size_t r = 0; r < num_receivers; ++r ) {
-                         receivers[r].initialize_map( N, num_senders ); 
+                         receivers[r]->initialize_map( N, num_senders );
                     }
 
                     // Do the test
                     NativeParallelFor( (int)num_senders, parallel_put_until_limit<InputType>(senders) );
                     g.wait_for_all();
 
-                    // confirm that each sender was requested from N times 
+                    // confirm that each sender was requested from N times
                     for (size_t s = 0; s < num_senders; ++s ) {
                         size_t n = senders[s].my_received;
-                        ASSERT( n == N, NULL ); 
+                        ASSERT( n == N, NULL );
                         ASSERT( senders[s].my_receiver == &exe_vec[node_idx], NULL );
                     }
                     // validate the receivers
                     for (size_t r = 0; r < num_receivers; ++r ) {
-                        receivers[r].validate();
+                        receivers[r]->validate();
                     }
                     delete [] senders;
                 }
                 for (size_t r = 0; r < num_receivers; ++r ) {
-                    tbb::flow::remove_edge( tbb::flow::output_port<0>(exe_vec[node_idx]), receivers[r] );
+                    tbb::flow::remove_edge( tbb::flow::output_port<0>(exe_vec[node_idx]), *receivers[r] );
                 }
                 ASSERT( exe_vec[node_idx].try_put( InputType() ) == true, NULL );
                 g.wait_for_all();
                 for (size_t r = 0; r < num_receivers; ++r ) {
                     // since it's detached, nothing should have changed
-                    receivers[r].validate();
+                    receivers[r]->validate();
                 }
-                delete [] receivers;
+
+                for (size_t i = 0; i < num_receivers; i++) {
+                    delete receivers[i];
+                }
             }
-        } 
+        }
     }
 }
 
@@ -151,19 +163,24 @@ template< typename InputType, typename OutputTuple >
 void buffered_levels_with_copy( size_t concurrency ) {
     typedef typename tbb::flow::tuple_element<0,OutputTuple>::type OutputType;
     // Do for lc = 1 to concurrency level
-    for ( size_t lc = 1; lc <= concurrency; ++lc ) { 
+    for ( size_t lc = 1; lc <= concurrency; ++lc ) {
         tbb::flow::graph g;
 
         inc_functor cf;
         cf.local_execute_count = Offset;
         global_execute_count = Offset;
-       
+
         tbb::flow::multifunction_node< InputType, OutputTuple > exe_node( g, lc, cf );
 
         for (size_t num_receivers = 1; num_receivers <= MAX_NODES; ++num_receivers ) {
-           harness_mapped_receiver<OutputType> *receivers = new harness_mapped_receiver<OutputType>[num_receivers];
-           for (size_t r = 0; r < num_receivers; ++r ) {
-               tbb::flow::make_edge( tbb::flow::output_port<0>(exe_node), receivers[r] );
+
+            std::vector< harness_mapped_receiver<OutputType>* > receivers(num_receivers);
+            for (size_t i = 0; i < num_receivers; i++) {
+                receivers[i] = new harness_mapped_receiver<OutputType>(g);
+            }
+
+            for (size_t r = 0; r < num_receivers; ++r ) {
+               tbb::flow::make_edge( tbb::flow::output_port<0>(exe_node), *receivers[r] );
             }
 
             harness_counting_sender<InputType> *senders = NULL;
@@ -175,7 +192,7 @@ void buffered_levels_with_copy( size_t concurrency ) {
                 }
 
                 for (size_t r = 0; r < num_receivers; ++r ) {
-                    receivers[r].initialize_map( N, num_senders ); 
+                    receivers[r]->initialize_map( N, num_senders );
                 }
 
                 NativeParallelFor( (int)num_senders, parallel_put_until_limit<InputType>(senders) );
@@ -183,37 +200,40 @@ void buffered_levels_with_copy( size_t concurrency ) {
 
                 for (size_t s = 0; s < num_senders; ++s ) {
                     size_t n = senders[s].my_received;
-                    ASSERT( n == N, NULL ); 
+                    ASSERT( n == N, NULL );
                     ASSERT( senders[s].my_receiver == &exe_node, NULL );
                 }
                 for (size_t r = 0; r < num_receivers; ++r ) {
-                    receivers[r].validate();
+                    receivers[r]->validate();
                 }
                 delete [] senders;
             }
             for (size_t r = 0; r < num_receivers; ++r ) {
-                tbb::flow::remove_edge( tbb::flow::output_port<0>(exe_node), receivers[r] );
+                tbb::flow::remove_edge( tbb::flow::output_port<0>(exe_node), *receivers[r] );
             }
             ASSERT( exe_node.try_put( InputType() ) == true, NULL );
             g.wait_for_all();
             for (size_t r = 0; r < num_receivers; ++r ) {
-                receivers[r].validate();
+                receivers[r]->validate();
             }
-            delete [] receivers;
+
+            for (size_t i = 0; i < num_receivers; i++) {
+                delete receivers[i];
+            }
         }
 
         // validate that the local body matches the global execute_count and both are correct
         inc_functor body_copy = tbb::flow::copy_body<inc_functor>( exe_node );
-        const size_t expected_count = N/2 * MAX_NODES * MAX_NODES * ( MAX_NODES + 1 ) + MAX_NODES + Offset; 
+        const size_t expected_count = N/2 * MAX_NODES * MAX_NODES * ( MAX_NODES + 1 ) + MAX_NODES + Offset;
         size_t global_count = global_execute_count;
         size_t inc_count = body_copy.local_execute_count;
-        ASSERT( global_count == expected_count && global_count == inc_count, NULL ); 
+        ASSERT( global_count == expected_count && global_count == inc_count, NULL );
     }
 }
 
 template< typename InputType, typename OutputTuple >
 void run_buffered_levels( int c ) {
-    #if __TBB_LAMBDAS_PRESENT
+    #if __TBB_CPP11_LAMBDAS_PRESENT
     typedef typename tbb::flow::multifunction_node<InputType,OutputTuple>::output_ports_type output_ports_type;
     buffered_levels<InputType,OutputTuple>( c, []( InputType i, output_ports_type &p ) { harness_graph_multifunction_executor<InputType, OutputTuple>::func(i,p); } );
     #endif
@@ -226,16 +246,16 @@ void run_buffered_levels( int c ) {
 //! Performs test on executable nodes with limited concurrency
 /** Theses tests check:
     1) that the nodes will accepts puts up to the concurrency limit,
-    2) the nodes do not exceed the concurrency limit even when run with more threads (this is checked in the harness_graph_executor), 
+    2) the nodes do not exceed the concurrency limit even when run with more threads (this is checked in the harness_graph_executor),
     3) the nodes will receive puts from multiple successors simultaneously,
     and 4) the nodes will send to multiple predecessors.
     There is no checking of the contents of the messages for corruption.
 */
-     
+
 template< typename InputType, typename OutputTuple, typename Body >
 void concurrency_levels( size_t concurrency, Body body ) {
     typedef typename tbb::flow::tuple_element<0,OutputTuple>::type OutputType;
-    for ( size_t lc = 1; lc <= concurrency; ++lc ) { 
+    for ( size_t lc = 1; lc <= concurrency; ++lc ) {
         tbb::flow::graph g;
 
         // Set the execute_counter back to zero in the harness
@@ -250,41 +270,41 @@ void concurrency_levels( size_t concurrency, Body body ) {
 
         for (size_t num_receivers = 1; num_receivers <= MAX_NODES; ++num_receivers ) {
 
-            harness_counting_receiver<OutputType> *receivers = new harness_counting_receiver<OutputType>[num_receivers];
+            std::vector< harness_counting_receiver<OutputType> > receivers(num_receivers, harness_counting_receiver<OutputType>(g));
 
             for (size_t r = 0; r < num_receivers; ++r ) {
                 tbb::flow::make_edge( tbb::flow::output_port<0>(exe_node), receivers[r] );
             }
 
             harness_counting_sender<InputType> *senders = NULL;
-    
+
             for (size_t num_senders = 1; num_senders <= MAX_NODES; ++num_senders ) {
                 {
                     // Exclusively lock m to prevent exe_node from finishing
                     tbb::spin_rw_mutex::scoped_lock l( harness_graph_multifunction_executor< InputType, OutputTuple>::template mutex_holder<tbb::spin_rw_mutex>::mutex );
-    
+
                     // put to lc level, it will accept and then block at m
                     for ( size_t c = 0 ; c < lc ; ++c ) {
                         ASSERT( exe_node.try_put( InputType() ) == true, NULL );
                     }
                     // it only accepts to lc level
                     ASSERT( exe_node.try_put( InputType() ) == false, NULL );
-    
+
                     senders = new harness_counting_sender<InputType>[num_senders];
                     for (size_t s = 0; s < num_senders; ++s ) {
                        // register a sender
                        senders[s].my_limit = N;
                        exe_node.register_predecessor( senders[s] );
                     }
-    
+
                 } // release lock at end of scope, setting the exe node free to continue
                 // wait for graph to settle down
                 g.wait_for_all();
-    
-                // confirm that each sender was requested from N times 
+
+                // confirm that each sender was requested from N times
                 for (size_t s = 0; s < num_senders; ++s ) {
                     size_t n = senders[s].my_received;
-                    ASSERT( n == N, NULL ); 
+                    ASSERT( n == N, NULL );
                     ASSERT( senders[s].my_receiver == &exe_node, NULL );
                 }
                 // confirm that each receivers got N * num_senders + the initial lc puts
@@ -303,14 +323,13 @@ void concurrency_levels( size_t concurrency, Body body ) {
             for (size_t r = 0; r < num_receivers; ++r ) {
                 ASSERT( int(receivers[r].my_count) == 0, NULL );
             }
-            delete [] receivers;
         }
     }
 }
 
 template< typename InputType, typename OutputTuple >
 void run_concurrency_levels( int c ) {
-    #if __TBB_LAMBDAS_PRESENT
+    #if __TBB_CPP11_LAMBDAS_PRESENT
     typedef typename tbb::flow::multifunction_node<InputType,OutputTuple>::output_ports_type output_ports_type;
     concurrency_levels<InputType,OutputTuple>( c, []( InputType i, output_ports_type &p ) { harness_graph_multifunction_executor<InputType, OutputTuple>::template tfunc<tbb::spin_rw_mutex>(i,p); } );
     #endif
@@ -319,7 +338,7 @@ void run_concurrency_levels( int c ) {
 }
 
 
-struct empty_no_assign { 
+struct empty_no_assign {
    empty_no_assign() {}
    empty_no_assign( int ) {}
    operator int() { return 0; }
@@ -359,7 +378,8 @@ void unlimited_concurrency( Body body ) {
         tbb::flow::multifunction_node< InputType, OutputTuple, tbb::flow::rejecting > exe_node( g, tbb::flow::unlimited, body );
 
         for (size_t num_receivers = 1; num_receivers <= MAX_NODES; ++num_receivers ) {
-            harness_counting_receiver<OutputType> *receivers = new harness_counting_receiver<OutputType>[num_receivers];
+            std::vector< harness_counting_receiver<OutputType> > receivers(num_receivers, harness_counting_receiver<OutputType>(g));
+
             harness_graph_multifunction_executor<InputType, OutputTuple>::execute_count = 0;
 
             for (size_t r = 0; r < num_receivers; ++r ) {
@@ -367,15 +387,18 @@ void unlimited_concurrency( Body body ) {
             }
 
             NativeParallelFor( p, parallel_puts<InputType>(exe_node) );
-            g.wait_for_all(); 
+            g.wait_for_all();
 
             // 2) the nodes will receive puts from multiple predecessors simultaneously,
             size_t ec = harness_graph_multifunction_executor<InputType, OutputTuple>::execute_count;
-            ASSERT( (int)ec == p*N, NULL ); 
+            ASSERT( (int)ec == p*N, NULL );
             for (size_t r = 0; r < num_receivers; ++r ) {
                 size_t c = receivers[r].my_count;
                 // 3) the nodes will send to multiple successors.
                 ASSERT( (int)c == p*N, NULL );
+            }
+            for (size_t r = 0; r < num_receivers; ++r ) {
+                tbb::flow::remove_edge( tbb::flow::output_port<0>(exe_node), receivers[r] );
             }
         }
     }
@@ -384,7 +407,7 @@ void unlimited_concurrency( Body body ) {
 template< typename InputType, typename OutputTuple >
 void run_unlimited_concurrency() {
     harness_graph_multifunction_executor<InputType, OutputTuple>::max_executors = 0;
-    #if __TBB_LAMBDAS_PRESENT
+    #if __TBB_CPP11_LAMBDAS_PRESENT
     typedef typename tbb::flow::multifunction_node<InputType,OutputTuple>::output_ports_type output_ports_type;
     unlimited_concurrency<InputType,OutputTuple>( []( InputType i, output_ports_type &p ) { harness_graph_multifunction_executor<InputType, OutputTuple>::func(i,p); } );
     #endif
@@ -422,13 +445,15 @@ void run_multiport_test(int num_threads) {
     tbb::flow::make_edge(tbb::flow::output_port<0>(mo_node), q0);
     tbb::flow::make_edge(tbb::flow::output_port<1>(mo_node), q1);
 
-#if TBB_PREVIEW_FLOW_GRAPH_FEATURES
+#if TBB_DEPRECATED_FLOW_NODE_EXTRACTION
     ASSERT(mo_node.predecessor_count() == 0, NULL);
     ASSERT(tbb::flow::output_port<0>(mo_node).successor_count() == 1, NULL);
-    std::vector< tbb::flow::receiver<EvenType> *> my_0succs;
+    typedef typename mo_node_type::output_ports_type oports_type;
+    typedef typename tbb::flow::tuple_element<0,oports_type>::type port0_type;
+    typename port0_type::successor_list_type my_0succs;
     tbb::flow::output_port<0>(mo_node).copy_successors(my_0succs);
     ASSERT(my_0succs.size() == 1, NULL);
-    typename mo_node_type::predecessor_vector_type my_preds;
+    typename mo_node_type::predecessor_list_type my_preds;
     mo_node.copy_predecessors(my_preds);
     ASSERT(my_preds.size() == 0, NULL);
 #endif
@@ -462,16 +487,27 @@ void test_concurrency(int num_threads) {
     run_multiport_test<float, tbb::flow::tuple<int, double> >(num_threads);
 }
 
-#if TBB_PREVIEW_FLOW_GRAPH_FEATURES
+template<typename Policy>
+void test_ports_return_references() {
+    tbb::flow::graph g;
+    typedef int InputType;
+    typedef tbb::flow::tuple<int> OutputTuple;
+    tbb::flow::multifunction_node<InputType, OutputTuple, Policy> mf_node(
+        g, tbb::flow::unlimited,
+        &harness_graph_multifunction_executor<InputType, OutputTuple>::empty_func );
+    test_output_ports_return_ref(mf_node);
+}
+
+#if TBB_DEPRECATED_FLOW_NODE_EXTRACTION
 // the integer received indicates which output ports should succeed and which should fail
 // on try_put().
-typedef tbb::flow::multifunction_node<int, tbb::flow::tuple<int, int> > mf_node;
+typedef tbb::flow::multifunction_node<int, tbb::flow::tuple<int, int> > mf_node_type;
 
 struct add_to_counter {
     int my_invocations;
     int *counter;
     add_to_counter(int& var):counter(&var){ my_invocations = 0;}
-    void operator()(const int &i, mf_node::output_ports_type &outports) {
+    void operator()(const int &i, mf_node_type::output_ports_type &outports) {
         *counter+=1;
         ++my_invocations;
         if(i & 0x1) {
@@ -490,7 +526,7 @@ struct add_to_counter {
     int my_inner() { return my_invocations; }
 };
 
-template<tbb::flow::graph_buffer_policy FTYPE>
+template<class FTYPE>
 void test_extract() {
     int my_count = 0;
     int cm;
@@ -506,7 +542,7 @@ void test_extract() {
     tbb::flow::make_edge(tbb::flow::output_port<0>(mf0), q0);
     tbb::flow::make_edge(tbb::flow::output_port<1>(mf0), q1);
     for( int i = 0; i < 2; ++i ) {
-    
+
         /* b0          */
         /*   \   |--q0 */
         /*    mf0+     */
@@ -531,16 +567,16 @@ void test_extract() {
         ASSERT(my_count == 2, "multifunction_node didn't fire");
         ASSERT(q0.try_get(cm), "multifunction_node didn't forward to 0");
         ASSERT(q1.try_get(cm), "multifunction_node didn't forward to 1");
-    
+
         b0.extract();
-    
-    
+
+
         /* b0          */
         /*       |--q0 */
         /*    mf0+     */
         /*   /   |--q1 */
         /* b1          */
-    
+
         ASSERT(b0.predecessor_count() == 0 && b0.successor_count() == 0, "b0 has incorrect counts");
         ASSERT(b1.predecessor_count() == 0 && b1.successor_count() == 1, "b1 has incorrect counts");
         ASSERT(mf0.predecessor_count() == 1
@@ -560,13 +596,13 @@ void test_extract() {
         ASSERT(q1.try_get(cm), "multifunction_node didn't forward second time");
 
         q0.extract();
-    
+
         /* b0          */
         /*       |  q0 */
         /*    mf0+     */
         /*   /   |--q1 */
         /* b1          */
-    
+
         ASSERT(b0.predecessor_count() == 0 && b0.successor_count() == 0, "b0 has incorrect counts");
         ASSERT(b1.predecessor_count() == 0 && b1.successor_count() == 1, "b1 has incorrect counts");
         ASSERT(mf0.predecessor_count() == 1
@@ -584,21 +620,21 @@ void test_extract() {
         ASSERT(my_count == 4, "multifunction_node didn't fire though it has one predecessor");
         ASSERT(!q0.try_get(cm), "multifunction_node forwarded");
         ASSERT(q1.try_get(cm), "multifunction_node forwarded");
-    
+        mf0.extract();
+
         if(i == 0) {
-            mf0.extract();
         }
         else {
-            mf0.extract(tbb::flow::rf_reset_bodies);
+            g.reset(tbb::flow::rf_reset_bodies);
         }
-    
-    
+
+
         /* b0          */
         /*       |  q0 */
         /*    mf0+     */
         /*       |  q1 */
         /* b1          */
-    
+
         ASSERT(b0.predecessor_count() == 0 && b0.successor_count() == 0, "b0 has incorrect counts");
         ASSERT(b1.predecessor_count() == 0 && b1.successor_count() == 0, "b1 has incorrect counts");
         ASSERT(mf0.predecessor_count() == 0
@@ -617,13 +653,13 @@ void test_extract() {
         ASSERT(!q0.try_get(cm), "multifunction_node forwarded");
         ASSERT(!q1.try_get(cm), "multifunction_node forwarded");
         make_edge(b0, mf0);
-    
+
         /* b0          */
         /*   \   |  q0 */
         /*    mf0+     */
         /*       |  q1 */
         /* b1          */
-    
+
         ASSERT(b0.predecessor_count() == 0 && b0.successor_count() == 1, "b0 has incorrect counts");
         ASSERT(b1.predecessor_count() == 0 && b1.successor_count() == 0, "b1 has incorrect counts");
         ASSERT(mf0.predecessor_count() == 1
@@ -640,7 +676,7 @@ void test_extract() {
         ASSERT(my_count == 5, "multifunction_node fired though it has only one predecessor");
         ASSERT(!q0.try_get(cm), "multifunction_node forwarded");
         ASSERT(!q1.try_get(cm), "multifunction_node forwarded");
-    
+
         tbb::flow::make_edge(b1, mf0);
         tbb::flow::make_edge(tbb::flow::output_port<0>(mf0), q0);
         tbb::flow::make_edge(tbb::flow::output_port<1>(mf0), q1);
@@ -651,16 +687,18 @@ void test_extract() {
 }
 #endif
 
-int TestMain() { 
+int TestMain() {
     if( MinThread<1 ) {
         REPORT("number of threads must be positive\n");
         exit(1);
     }
     for( int p=MinThread; p<=MaxThread; ++p ) {
        test_concurrency(p);
-   }
-
-#if TBB_PREVIEW_FLOW_GRAPH_FEATURES
+    }
+    test_ports_return_references<tbb::flow::queueing>();
+    test_ports_return_references<tbb::flow::rejecting>();
+    lightweight_testing::test<tbb::flow::multifunction_node>(10);
+#if TBB_DEPRECATED_FLOW_NODE_EXTRACTION
     test_extract<tbb::flow::rejecting>();
     test_extract<tbb::flow::queueing>();
 #endif

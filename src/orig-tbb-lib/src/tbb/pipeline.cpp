@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "tbb/pipeline.h"
@@ -169,8 +169,8 @@ public:
 
     //! Note that processing of a token is finished.
     /** Fires up processing of the next token, if processing was deferred. */
-    // Using template to avoid explicit dependency on stage_task
-    // this is only called for serial filters, and is the reason for the
+    // Uses template to avoid explicit dependency on stage_task.
+    // This is only called for serial filters, and is the reason for the
     // advance parameter in return_item (we're incrementing low_token here.)
     // Non-TBF serial stages don't advance the token at the start because the presence
     // of the current token in the buffer keeps another stage from being spawned.
@@ -206,8 +206,8 @@ public:
     }
 #endif
 
-    //! return an item, invalidate the queued item, but only advance if advance
-    //  advance == true for parallel filters.  If the filter is serial, leave the
+    //! return an item, invalidate the queued item, but only advance if the filter
+    // is parallel (as indicated by advance == true). If the filter is serial, leave the
     // item in the buffer to keep another stage from being spawned.
     bool return_item(task_info& info, bool advance) {
         spin_mutex::scoped_lock lock( array_mutex );
@@ -282,7 +282,7 @@ public:
         my_at_start = true;
     }
     //! The virtual task execution method
-    /*override*/ task* execute();
+    task* execute() __TBB_override;
 #if __TBB_TASK_GROUP_CONTEXT
     ~stage_task()
     {
@@ -405,7 +405,7 @@ class pipeline_root_task: public task {
     pipeline& my_pipeline;
     bool do_segment_scanning;
 
-    /*override*/ task* execute() {
+    task* execute() __TBB_override {
         if( !my_pipeline.end_of_input )
             if( !my_pipeline.filter_list->is_bound() )
                 if( my_pipeline.input_tokens > 0 ) {
@@ -425,10 +425,27 @@ class pipeline_root_task: public task {
                 {
                     task_info info;
                     info.reset();
-                    if( current_filter->my_input_buffer->return_item(info, !current_filter->is_serial()) ) {
-                        set_ref_count(1);
+                    task* bypass = NULL;
+                    int refcnt = 0;
+                    task_list list;
+                    // No new tokens are created; it's OK to process all waiting tokens.
+                    // If the filter is serial, the second call to return_item will return false.
+                    while( current_filter->my_input_buffer->return_item(info, !current_filter->is_serial()) ) {
+                        task* t = new( allocate_child() ) stage_task( my_pipeline, current_filter, info );
+                        if( ++refcnt == 1 )
+                            bypass = t;
+                        else // there's more than one task
+                            list.push_back(*t);
+                        // TODO: limit the list size (to arena size?) to spawn tasks sooner
+                        __TBB_ASSERT( refcnt <= int(my_pipeline.token_counter), "token counting error" );
+                        info.reset();
+                    }
+                    if( refcnt ) {
+                        set_ref_count( refcnt );
+                        if( refcnt > 1 )
+                            spawn(list);
                         recycle_as_continuation();
-                        return new( allocate_child() ) stage_task( my_pipeline, current_filter, info);
+                        return bypass;
                     }
                     current_filter = current_filter->next_segment;
                     if( !current_filter ) {
@@ -565,9 +582,7 @@ void pipeline::add_filter( filter& filter_ ) {
             filter_end->next_filter_in_pipeline = &filter_;
         filter_.next_filter_in_pipeline = NULL;
         filter_end = &filter_;
-    }
-    else
-    {
+    } else {
         if( !filter_end )
             filter_end = reinterpret_cast<filter*>(&filter_list);
 
@@ -580,15 +595,13 @@ void pipeline::add_filter( filter& filter_ ) {
             if( filter_.is_bound() )
                 has_thread_bound_filters = true;
             filter_.my_input_buffer = new internal::input_buffer( filter_.is_ordered(), filter_.is_bound() );
-        }
-        else {
+        } else {
             if(filter_.prev_filter_in_pipeline) {
                 if(filter_.prev_filter_in_pipeline->is_bound()) {
                     // successors to bound filters must have an input_buffer
                     filter_.my_input_buffer = new internal::input_buffer( /*is_ordered*/false, false );
                 }
-            }
-            else {  // input filter
+            } else {  // input filter
                 if(filter_.object_may_be_null() ) {
                     //TODO: buffer only needed to hold TLS; could improve
                     filter_.my_input_buffer = new internal::input_buffer( /*is_ordered*/false, false );
@@ -696,14 +709,12 @@ filter::~filter() {
     }
 }
 
-void
-filter::set_end_of_input() {
+void filter::set_end_of_input() {
     __TBB_ASSERT(my_input_buffer, NULL);
     __TBB_ASSERT(object_may_be_null(), NULL);
     if(is_serial()) {
         my_pipeline->end_of_input = true;
-    }
-    else {
+    } else {
         __TBB_ASSERT(my_input_buffer->end_of_input_tls_allocated, NULL);
         my_input_buffer->set_my_tls_end_of_input();
     }

@@ -1,25 +1,25 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
-#include "rml_tbb.h"
-#include "../server/thread_monitor.h"
+#include "../rml/include/rml_tbb.h"
+#include "../rml/server/thread_monitor.h"
 #include "tbb/atomic.h"
 #include "tbb/cache_aligned_allocator.h"
 #include "scheduler_common.h"
@@ -37,6 +37,7 @@ typedef thread_monitor::handle_type thread_handle;
 class private_server;
 
 class private_worker: no_copy {
+private:
     //! State in finite-state machine that controls the worker.
     /** State diagram:
         init --> starting --> normal
@@ -55,12 +56,12 @@ class private_worker: no_copy {
         st_quit
     };
     atomic<state_t> my_state;
-    
+
     //! Associated server
-    private_server& my_server; 
+    private_server& my_server;
 
     //! Associated client
-    tbb_client& my_client; 
+    tbb_client& my_client;
 
     //! index used for avoiding the 64K aliasing problem
     const size_t my_index;
@@ -78,7 +79,7 @@ class private_worker: no_copy {
 
     friend class private_server;
 
-    //! Actions executed by the associated thread 
+    //! Actions executed by the associated thread
     void run();
 
     //! Wake up associated thread (or launch a thread if there is none)
@@ -92,10 +93,9 @@ class private_worker: no_copy {
     static void release_handle(thread_handle my_handle, bool join);
 
 protected:
-    private_worker( private_server& server, tbb_client& client, const size_t i ) : 
-        my_server(server),
-        my_client(client),
-        my_index(i)
+    private_worker( private_server& server, tbb_client& client, const size_t i ) :
+        my_server(server), my_client(client), my_index(i),
+        my_thread_monitor(), my_handle(), my_next()
     {
         my_state = st_init;
     }
@@ -120,6 +120,7 @@ public:
 #endif
 
 class private_server: public tbb_server, no_copy {
+private:
     tbb_client& my_client;
     //! Maximum number of threads to be created.
     /** Threads are created lazily, so maximum might not actually be reached. */
@@ -130,7 +131,7 @@ class private_server: public tbb_server, no_copy {
 
     //! Number of jobs that could use their associated thread minus number of active threads.
     /** If negative, indicates oversubscription.
-        If positive, indicates that more threads should run. 
+        If positive, indicates that more threads should run.
         Can be lowered asynchronously, but must be raised only while holding my_asleep_list_mutex,
         because raising it impacts the invariant for sleeping threads. */
     atomic<int> my_slack;
@@ -156,7 +157,7 @@ class private_server: public tbb_server, no_copy {
         which in turn each wake up two threads, etc. */
     void propagate_chain_reaction() {
         // First test of a double-check idiom.  Second test is inside wake_some(0).
-        if( my_asleep_list_root ) 
+        if( my_asleep_list_root )
             wake_some(0);
     }
 
@@ -167,40 +168,40 @@ class private_server: public tbb_server, no_copy {
     void wake_some( int additional_slack );
 
     virtual ~private_server();
-    
+
     void remove_server_ref() {
         if( --my_ref_count==0 ) {
             my_client.acknowledge_close_connection();
             this->~private_server();
             tbb::cache_aligned_allocator<private_server>().deallocate( this, 1 );
-        } 
+        }
     }
 
     friend class private_worker;
 public:
     private_server( tbb_client& client );
 
-    /*override*/ version_type version() const {
+    version_type version() const __TBB_override {
         return 0;
-    } 
+    }
 
-    /*override*/ void request_close_connection( bool /*exiting*/ ) {
+    void request_close_connection( bool /*exiting*/ ) __TBB_override {
         for( size_t i=0; i<my_n_thread; ++i )
             my_thread_array[i].start_shutdown();
         remove_server_ref();
     }
 
-    /*override*/ void yield() {__TBB_Yield();}
+    void yield() __TBB_override {__TBB_Yield();}
 
-    /*override*/ void independent_thread_number_changed( int ) {__TBB_ASSERT(false,NULL);}
+    void independent_thread_number_changed( int ) __TBB_override {__TBB_ASSERT(false,NULL);}
 
-    /*override*/ unsigned default_concurrency() const { return governor::default_num_threads() - 1; }
+    unsigned default_concurrency() const __TBB_override { return governor::default_num_threads() - 1; }
 
-    /*override*/ void adjust_job_count_estimate( int delta );
+    void adjust_job_count_estimate( int delta ) __TBB_override;
 
 #if _WIN32||_WIN64
-    /*override*/ void register_master ( ::rml::server::execution_resource_t& ) {}
-    /*override*/ void unregister_master ( ::rml::server::execution_resource_t ) {}
+    void register_master ( ::rml::server::execution_resource_t& ) __TBB_override {}
+    void unregister_master ( ::rml::server::execution_resource_t ) __TBB_override {}
 #endif /* _WIN32||_WIN64 */
 };
 
@@ -219,10 +220,6 @@ __attribute__((force_align_arg_pointer))
 __RML_DECL_THREAD_ROUTINE private_worker::thread_routine( void* arg ) {
     private_worker* self = static_cast<private_worker*>(arg);
     AVOID_64K_ALIASING( self->my_index );
-#if _XBOX
-    int HWThreadIndex = __TBB_XBOX360_GetHardwareThreadIndex(i);
-    XSetThreadProcessor(GetCurrentThread(), HWThreadIndex);
-#endif
     self->run();
     return 0;
 }
@@ -264,7 +261,7 @@ void private_worker::run() {
     my_server.propagate_chain_reaction();
 
     // Transiting to st_normal here would require setting my_handle,
-    // which would create race with the launching thread and 
+    // which would create race with the launching thread and
     // complications in handle management on Windows.
 
     ::rml::job& j = *my_client.create_one_job();
@@ -278,6 +275,7 @@ void private_worker::run() {
             // Check/set the invariant for sleeping
             if( my_state!=st_quit && my_server.try_insert_in_asleep_list(*this) ) {
                 my_thread_monitor.commit_wait(c);
+                __TBB_ASSERT( my_state==st_quit || !my_next, "Thread monitor missed a spurious wakeup?" );
                 my_server.propagate_chain_reaction();
             } else {
                 // Invariant broken
@@ -299,7 +297,7 @@ inline void private_worker::wake_or_launch() {
 #elif USE_PTHREAD
         {
         affinity_helper fpa;
-        fpa.protect_affinity_mask();
+        fpa.protect_affinity_mask( /*restore_process_mask=*/true );
         my_handle = thread_monitor::launch( thread_routine, this, my_server.my_stack_size );
         // Implicit destruction of fpa resets original affinity mask.
         }
@@ -313,18 +311,20 @@ inline void private_worker::wake_or_launch() {
             release_handle(my_handle, governor::does_client_join_workers(my_client));
         }
     }
-    else
+    else {
+        __TBB_ASSERT( !my_next, "Should not wake a thread while it's still in asleep list" );
         my_thread_monitor.notify();
+    }
 }
 
 //------------------------------------------------------------------------
 // Methods of private_server
 //------------------------------------------------------------------------
-private_server::private_server( tbb_client& client ) : 
-    my_client(client), 
+private_server::private_server( tbb_client& client ) :
+    my_client(client),
     my_n_thread(client.max_job_count()),
     my_stack_size(client.min_stack_size()),
-    my_thread_array(NULL) 
+    my_thread_array(NULL)
 {
     my_ref_count = my_n_thread+1;
     my_slack = 0;
@@ -333,17 +333,16 @@ private_server::private_server( tbb_client& client ) :
 #endif /* TBB_USE_ASSERT */
     my_asleep_list_root = NULL;
     my_thread_array = tbb::cache_aligned_allocator<padded_private_worker>().allocate( my_n_thread );
-    memset( my_thread_array, 0, sizeof(private_worker)*my_n_thread );
     for( size_t i=0; i<my_n_thread; ++i ) {
-        private_worker* t = new( &my_thread_array[i] ) padded_private_worker( *this, client, i ); 
+        private_worker* t = new( &my_thread_array[i] ) padded_private_worker( *this, client, i );
         t->my_next = my_asleep_list_root;
         my_asleep_list_root = t;
-    } 
+    }
 }
 
 private_server::~private_server() {
     __TBB_ASSERT( my_net_slack_requests==0, NULL );
-    for( size_t i=my_n_thread; i--; ) 
+    for( size_t i=my_n_thread; i--; )
         my_thread_array[i].~padded_private_worker();
     tbb::cache_aligned_allocator<padded_private_worker>().deallocate( my_thread_array, my_n_thread );
     tbb::internal::poison_pointer( my_thread_array );
@@ -394,8 +393,11 @@ void private_server::wake_some( int additional_slack ) {
         }
     }
 done:
-    while( w>wakee ) 
-        (*--w)->wake_or_launch();
+    while( w>wakee ) {
+        private_worker* ww = *--w;
+        ww->my_next = NULL;
+        ww->wake_or_launch();
+    }
 }
 
 void private_server::adjust_job_count_estimate( int delta ) {

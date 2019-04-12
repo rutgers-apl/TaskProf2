@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "tbb/tbb_config.h"
@@ -23,6 +23,7 @@
 #define TBB_PREVIEW_RUNTIME_LOADER 1
 #include "tbb/runtime_loader.h"
 #include "tbb/tbb_stddef.h"
+#include "tbb_environment.h"
 
 // C standard headers.
 #include <cctype>            // isspace
@@ -77,11 +78,11 @@ namespace runtime_loader {
 // Print message to stderr. Do not call it directly, use say() or tell() instead.
 static void _say( char const * format, va_list args ) {
     /*
-        On Linux Intel 64, vsnprintf() modifies args argument, so vsnprintf() crashes if it
-        is called for the second time with the same args. To prevent the crash, we have to
-        pass a fresh intact copy of args to vsnprintf() each time.
+        On 64-bit Linux* OS, vsnprintf() modifies args argument,
+        so vsnprintf() crashes if it is called for the second time with the same args.
+        To prevent the crash, we have to pass a fresh intact copy of args to vsnprintf() each time.
 
-        On Windows, unfortunately, standard va_copy() macro is not available. However, it
+        On Windows* OS, unfortunately, standard va_copy() macro is not available. However, it
         seems vsnprintf() does not modify args argument.
     */
     #if ! ( _WIN32 || _WIN64 )
@@ -95,12 +96,13 @@ static void _say( char const * format, va_list args ) {
         va_end( _args );
     #endif
     char * buf = reinterpret_cast< char * >( malloc( len + 1 ) );
-    if ( buf == NULL ) {
-        abort();
-    } // if
-    vsnprintf( buf, len + 1, format, args );
-    fprintf( stderr, "TBB: %s\n", buf );
-    free( buf );
+    if ( buf != NULL ) {
+        vsnprintf( buf, len + 1, format, args );
+        fprintf( stderr, "TBB: %s\n", buf );
+        free( buf );
+    } else {
+        fprintf( stderr, "TBB: Not enough memory for message: %s\n", format );
+    }
 } // _say
 
 
@@ -108,8 +110,7 @@ static void _say( char const * format, va_list args ) {
 // To enable printing, the variable must be set and not empty.
 // Do not call it directly, use tell() instead.
 static void _tell( char const * format, va_list args ) {
-    char const * var = getenv( "TBB_VERSION" );
-    if ( var != NULL && var[ 0 ] != 0 ) {
+    if ( tbb::internal::GetBoolEnvironmentVariable("TBB_VERSION") ) {
         _say( format, args );
     } // if
 } // _tell
@@ -351,8 +352,7 @@ static tbb::runtime_loader::error_code _load( char const * dll_name, int min_ver
     tbb::runtime_loader::error_code code = tbb::runtime_loader::ec_ok;
 
     /*
-        If these variables declared at the first usage, Intel compiler (on Windows IA-32) isues
-        warning(s):
+        If these variables declared at the first usage, Intel C++ Compiler may issue warning(s):
             transfer of control [goto error] bypasses initialization of: ...
         Declaring variables at the beginning of the function eliminates warnings.
     */
@@ -520,6 +520,8 @@ static tbb::runtime_loader::error_code load( tbb::runtime_loader::error_mode mod
             free( buffer );
             buflen = len;
             buffer = (char*)malloc( buflen );
+            if( !buffer )
+                return error( mode, tbb::runtime_loader::ec_no_lib, "Not enough memory." );
         }
         cat_file( path[i], tbb_dll_name, buffer, buflen );
         __TBB_ASSERT(strstr(buffer,tbb_dll_name), "Name concatenation error");
@@ -535,7 +537,7 @@ static tbb::runtime_loader::error_code load( tbb::runtime_loader::error_mode mod
 
 
 
-// Supress "defined but not used" compiler warnings.
+// Suppress "defined but not used" compiler warnings.
 static void const * dummy[] = {
     (void *) & strip,
     (void *) & trim,

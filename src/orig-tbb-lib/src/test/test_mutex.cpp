@@ -1,25 +1,22 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
-
-#define HARNESS_DEFAULT_MIN_THREADS 1
-#define HARNESS_DEFAULT_MAX_THREADS 3
 
 //------------------------------------------------------------------------
 // Test TBB mutexes when used with parallel_for.h
@@ -603,6 +600,33 @@ void TestTransaction( const char * name )
 }
 #endif  /* __TBB_TSX_TESTING_ENABLED_FOR_THIS_COMPILER */
 
+template<typename M>
+class RWStateMultipleChangeBody {
+    M& my_mutex;
+public:
+    RWStateMultipleChangeBody(M& m) : my_mutex(m) {}
+
+    void operator()(const tbb::blocked_range<size_t>& r) const {
+        typename M::scoped_lock l(my_mutex, /*write=*/false);
+        for(size_t i = r.begin(); i != r.end(); ++i) {
+            ASSERT(l.downgrade_to_reader(), "Downgrade must succeed for read lock");
+        }
+        l.upgrade_to_writer();
+        for(size_t i = r.begin(); i != r.end(); ++i) {
+            ASSERT(l.upgrade_to_writer(), "Upgrade must succeed for write lock");
+        }
+    }
+};
+
+template<typename M>
+void TestRWStateMultipleChange() {
+    ASSERT(M::is_rw_mutex, "Incorrect mutex type");
+    size_t n = 10000;
+    M mutex;
+    RWStateMultipleChangeBody<M> body(mutex);
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, n, n/10), body);
+}
+
 int TestMain () {
     for( int p=MinThread; p<=MaxThread; ++p ) {
         tbb::task_scheduler_init init( p );
@@ -669,6 +693,10 @@ int TestMain () {
             TestTryAcquire_OneThreadISO<tbb::critical_section>( "ISO Critical Section" );
             TestReaderWriterLockISO<tbb::spin_rw_mutex>( "ISO Spin RW Mutex" );
             TestRecursiveMutexISO<tbb::recursive_mutex>( "ISO Recursive Mutex" );
+
+            TestRWStateMultipleChange<tbb::spin_rw_mutex>();
+            TestRWStateMultipleChange<tbb::speculative_spin_rw_mutex>();
+            TestRWStateMultipleChange<tbb::queuing_rw_mutex>();
         }
     }
 

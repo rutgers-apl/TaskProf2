@@ -1,27 +1,25 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "TypeDefinitions.h" // Customize.h and proxy.h get included
 #include "tbbmalloc_internal_api.h"
-
-#include "../tbb/itt_notify.h" // for __TBB_load_ittnotify()
 
 #include "../tbb/tbb_assert_impl.h" // Out-of-line TBB assertion handling routines are instantiated here.
 
@@ -36,13 +34,6 @@
 namespace rml {
 namespace internal {
 
-/** Caller is responsible for ensuring this routine is called exactly once. */
-extern "C" void MallocInitializeITT() {
-#if DO_ITT_NOTIFY
-    tbb::internal::__TBB_load_ittnotify();
-#endif
-}
-
 #if TBB_USE_DEBUG
 #define DEBUG_SUFFIX "_debug"
 #else
@@ -54,7 +45,7 @@ extern "C" void MallocInitializeITT() {
 #define MALLOCLIB_NAME "tbbmalloc" DEBUG_SUFFIX ".dll"
 #elif __APPLE__
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX ".dylib"
-#elif __FreeBSD__ || __NetBSD__ || __sun || _AIX || __ANDROID__
+#elif __FreeBSD__ || __NetBSD__ || __OpenBSD__ || __sun || _AIX || __ANDROID__
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX ".so"
 #elif __linux__
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX  __TBB_STRING(.so.TBB_COMPATIBLE_INTERFACE_VERSION)
@@ -84,16 +75,15 @@ void init_tbbmalloc() {
 
 #if !__TBB_SOURCE_DIRECTLY_INCLUDED
 #if USE_WINTHREAD
-extern "C" BOOL WINAPI DllMain( HINSTANCE /*hInst*/, DWORD callReason, LPVOID )
+extern "C" BOOL WINAPI DllMain( HINSTANCE /*hInst*/, DWORD callReason, LPVOID lpvReserved)
 {
-
     if (callReason==DLL_THREAD_DETACH)
     {
         __TBB_mallocThreadShutdownNotification();
     }
     else if (callReason==DLL_PROCESS_DETACH)
     {
-        __TBB_mallocProcessShutdownNotification();
+        __TBB_mallocProcessShutdownNotification(lpvReserved != NULL);
     }
     return TRUE;
 }
@@ -105,9 +95,9 @@ struct RegisterProcessShutdownNotification {
         // prevents unloading, POSIX case
         dlopen(MALLOCLIB_NAME, RTLD_NOW);
     }
-#endif /* !__ANDROID__ */
+#endif /* !__TBB_USE_DLOPEN_REENTRANCY_WORKAROUND */
     ~RegisterProcessShutdownNotification() {
-        __TBB_mallocProcessShutdownNotification();
+        __TBB_mallocProcessShutdownNotification(false);
     }
 };
 

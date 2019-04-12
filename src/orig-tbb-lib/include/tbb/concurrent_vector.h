@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef __TBB_concurrent_vector_H
@@ -30,19 +30,11 @@
 #include "tbb_profiling.h"
 #include <new>
 #include <cstring>   // for memset()
-
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    // Suppress "C++ exception handler used, but unwind semantics are not enabled" warning in STL headers
-    #pragma warning (push)
-    #pragma warning (disable: 4530)
-#endif
-
+#include __TBB_STD_SWAP_HEADER
 #include <algorithm>
 #include <iterator>
 
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    #pragma warning (pop)
-#endif
+#include "internal/_allocator_traits.h"
 
 #if _MSC_VER==1500 && !__INTEL_COMPILER
     // VS2008/VC9 seems to have an issue; limits pull in math.h
@@ -72,11 +64,11 @@ namespace tbb {
 template<typename T, class A = cache_aligned_allocator<T> >
 class concurrent_vector;
 
-template<typename Container, typename Value>
-class vector_iterator;
-
 //! @cond INTERNAL
 namespace internal {
+
+    template<typename Container, typename Value>
+    class vector_iterator;
 
     //! Bad allocation marker
     static void *const vector_allocation_error_flag = reinterpret_cast<void*>(size_t(63));
@@ -84,7 +76,7 @@ namespace internal {
     //! Exception helper function
     template<typename T>
     void handle_unconstructed_elements(T* array, size_t n_of_elements){
-        std::memset(array, 0, n_of_elements * sizeof(T));
+        std::memset( static_cast<void*>(array), 0, n_of_elements * sizeof( T ) );
     }
 
     //! Base class of concurrent vector implementation.
@@ -126,6 +118,12 @@ namespace internal {
             template<typename T>
             T* pointer() const {  return static_cast<T*>(const_cast<void*>(array)); }
         };
+
+        friend void enforce_segment_allocated(segment_value_t const& s, internal::exception_id exception = eid_bad_last_alloc){
+            if(s != segment_allocated()){
+                internal::throw_exception(exception);
+            }
+        }
 
         // Segment pointer.
         class segment_t {
@@ -239,7 +237,7 @@ namespace internal {
             //and 2 is the minimal index for which it's true
             __TBB_ASSERT(element_index, "there should be no need to call "
                                         "is_first_element_in_segment for 0th element" );
-            return is_power_of_two_factor( element_index, 2 );
+            return is_power_of_two_at_least( element_index, 2 );
         }
 
         //! An operation on an n-element array starting at begin.
@@ -471,12 +469,9 @@ public:
     template<typename T, class A>
     class allocator_base {
     public:
-        typedef typename A::template
-            rebind<T>::other allocator_type;
+        typedef typename tbb::internal::allocator_rebind<A, T>::type allocator_type;
         allocator_type my_allocator;
-
         allocator_base(const allocator_type &a = allocator_type() ) : my_allocator(a) {}
-
     };
 
 } // namespace internal
@@ -746,9 +741,7 @@ public:
         if(pocma_t::value || this->my_allocator == other.my_allocator) {
             concurrent_vector trash (std::move(*this));
             internal_swap(other);
-            if (pocma_t::value) {
-                this->my_allocator = std::move(other.my_allocator);
-            }
+            tbb::internal::allocator_move_assignment(this->my_allocator, other.my_allocator, pocma_t());
         } else {
             internal_assign(other, sizeof(T), &destroy_array, &move_assign_array, &move_array);
         }
@@ -963,12 +956,14 @@ public:
     //! the first item
     reference front() {
         __TBB_ASSERT( size()>0, NULL);
-        return (my_segment[0].template load<relaxed>().template pointer<T>())[0];
+        const segment_value_t& segment_value = my_segment[0].template load<relaxed>();
+        return (segment_value.template pointer<T>())[0];
     }
     //! the first item const
     const_reference front() const {
         __TBB_ASSERT( size()>0, NULL);
-        return static_cast<const T*>(my_segment[0].array)[0];
+        const segment_value_t& segment_value = my_segment[0].template load<relaxed>();
+        return (segment_value.template pointer<const T>())[0];
     }
     //! the last item
     reference back() {
@@ -1004,10 +999,10 @@ public:
 
     //! swap two instances
     void swap(concurrent_vector &vector) {
-        using std::swap;
-        if( this != &vector ) {
+        typedef typename tbb::internal::allocator_traits<A>::propagate_on_container_swap pocs_t;
+        if( this != &vector && (this->my_allocator == vector.my_allocator || pocs_t::value) ) {
             concurrent_vector_base_v3::internal_swap(static_cast<concurrent_vector_base_v3&>(vector));
-            swap(this->my_allocator, vector.my_allocator);
+            tbb::internal::allocator_swap(this->my_allocator, vector.my_allocator, pocs_t());
         }
     }
 
@@ -1044,7 +1039,13 @@ private:
         internal_resize( n, sizeof(T), max_size(), static_cast<const void*>(p), &destroy_array, p? &initialize_array_by : &initialize_array );
     }
 
-    //! helper class
+    //! True/false function override helper
+    /* Functions declarations:
+     *     void foo(is_integer_tag<true>*);
+     *     void foo(is_integer_tag<false>*);
+     * Usage example:
+     *     foo(static_cast<is_integer_tag<std::numeric_limits<T>::is_integer>*>(0));
+     */
     template<bool B> class is_integer_tag;
 
     //! assign integer items by copying when arguments are treated as iterators. See C++ Standard 2003 23.1.1p9
@@ -1151,11 +1152,31 @@ private:
 
         pointer internal_push_back_result(){ return g.element;}
         iterator return_iterator_and_dismiss(){
+            pointer ptr = g.element;
             g.dismiss();
-            return iterator(v, k, g.element);
+            return iterator(v, k, ptr);
         }
     };
 };
+
+#if __TBB_CPP17_DEDUCTION_GUIDES_PRESENT
+// Deduction guide for the constructor from two iterators
+template<typename I,
+         typename T = typename std::iterator_traits<I>::value_type,
+         typename A = cache_aligned_allocator<T>
+> concurrent_vector(I, I, const A& = A())
+-> concurrent_vector<T, A>;
+
+// Deduction guide for the constructor from a vector and allocator
+template<typename T, typename A1, typename A2>
+concurrent_vector(const concurrent_vector<T, A1> &, const A2 &)
+-> concurrent_vector<T, A2>;
+
+// Deduction guide for the constructor from an initializer_list
+template<typename T, typename A = cache_aligned_allocator<T>
+> concurrent_vector(std::initializer_list<T>, const A& = A())
+-> concurrent_vector<T, A>;
+#endif /* __TBB_CPP17_DEDUCTION_GUIDES_PRESENT */
 
 #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
 #pragma warning (push)
@@ -1233,8 +1254,7 @@ T& concurrent_vector<T, A>::internal_subscript_with_exceptions( size_type index 
     //TODO: why not make a load of my_segment relaxed as well ?
     //TODO: add an assertion that my_segment[k] is properly aligned to please ITT
     segment_value_t segment_value =  my_segment[k].template load<relaxed>();
-    if( segment_value != segment_allocated() ) // check for correct segment pointer
-        internal::throw_exception(internal::eid_index_range_error); // throw std::range_error
+    enforce_segment_allocated(segment_value, internal::eid_index_range_error);
     return (segment_value.pointer<T>())[j];
 }
 
@@ -1295,8 +1315,8 @@ void concurrent_vector<T, A>::move_array_if_noexcept( void* dst, const void* src
 template<typename T, class A>
 template<typename I>
 void concurrent_vector<T, A>::copy_range( void* dst, const void* p_type_erased_iterator, size_type n ){
-    I & iterator ((*const_cast<I*>(static_cast<const I*>(p_type_erased_iterator))));
-    internal_loop_guide loop(n, dst); loop.iterate(iterator);
+    internal_loop_guide loop(n, dst);
+    loop.iterate( *(static_cast<I*>(const_cast<void*>(p_type_erased_iterator))) );
 }
 
 template<typename T, class A>

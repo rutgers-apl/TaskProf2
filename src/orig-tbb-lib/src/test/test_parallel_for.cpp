@@ -1,26 +1,26 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 // Test for function template parallel_for.h
 
-// Enable testing of serial subset.
+// These features are pure additions and thus can be always "on" in the test
 #define TBB_PREVIEW_SERIAL_SUBSET 1
 #include "harness_defs.h"
 
@@ -114,19 +114,20 @@ struct empty_partitioner_tag {};
 template <typename Flavor, typename Partitioner, typename Range, typename Body>
 struct Invoker;
 
+#if TBB_PREVIEW_SERIAL_SUBSET
 template <typename Range, typename Body>
 struct Invoker<serial_tag, empty_partitioner_tag, Range, Body> {
     void operator()( const Range& r, const Body& body, empty_partitioner_tag& ) {
         tbb::serial:: parallel_for( r, body );
     }
 };
-
 template <typename Partitioner, typename Range, typename Body>
 struct Invoker<serial_tag, Partitioner, Range, Body> {
     void operator()( const Range& r, const Body& body, Partitioner& p ) {
         tbb::serial:: parallel_for( r, body, p );
     }
 };
+#endif
 
 template <typename Range, typename Body>
 struct Invoker<parallel_tag, empty_partitioner_tag, Range, Body> {
@@ -145,6 +146,7 @@ struct Invoker<parallel_tag, Partitioner, Range, Body> {
 template <typename Flavor, typename Partitioner, typename T, typename Body>
 struct InvokerStep;
 
+#if TBB_PREVIEW_SERIAL_SUBSET
 template <typename T, typename Body>
 struct InvokerStep<serial_tag, empty_partitioner_tag, T, Body> {
     void operator()( const T& first, const T& last, const Body& f, empty_partitioner_tag& ) {
@@ -164,6 +166,7 @@ struct InvokerStep<serial_tag, Partitioner, T, Body> {
         tbb::serial:: parallel_for( first, last, step, f, p );
     }
 };
+#endif
 
 template <typename T, typename Body>
 struct InvokerStep<parallel_tag, empty_partitioner_tag, T, Body> {
@@ -245,17 +248,7 @@ public:
     }
 };
 
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    // Suppress "C++ exception handler used, but unwind semantics are not enabled" warning in STL headers
-    #pragma warning (push)
-    #pragma warning (disable: 4530)
-#endif
-
 #include <stdexcept> // std::invalid_argument
-
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    #pragma warning (pop)
-#endif
 
 template <typename Flavor, typename T, typename Partitioner>
 void TestParallelForWithStepSupportHelper(Partitioner& p)
@@ -305,7 +298,7 @@ void TestParallelForWithStepSupport()
 #if TBB_USE_EXCEPTIONS && !__TBB_THROW_ACROSS_MODULE_BOUNDARY_BROKEN
     try{
         tbb::parallel_for(static_cast<T>(1), static_cast<T>(100), static_cast<T>(0), TestFunctor<T>());  // should cause std::invalid_argument
-    }catch(std::invalid_argument){
+    }catch(std::invalid_argument&){
         return;
     }
     catch ( ... ) {
@@ -358,7 +351,7 @@ class my_worker_pfor_step_task : public tbb::task
 {
     tbb::task_group_context &my_ctx;
 
-    tbb::task* execute () {
+    tbb::task* execute () __TBB_override {
         if (g_worker_task_step == 0){
             tbb::parallel_for((size_t)0, (size_t)PFOR_BUFFER_TEST_SIZE, functor_to_cancel(), my_ctx);
         }else{
@@ -401,14 +394,15 @@ struct SSE_Functor {
 //! Test that parallel_for works with stack-allocated __m128
 template<typename ClassWithVectorType>
 void TestVectorTypes() {
-    ClassWithVectorType Array1[N], Array2[N];
-    for( int i=0; i<N; ++i ) {
+	const int aSize = 300;
+    ClassWithVectorType Array1[aSize], Array2[aSize];
+    for( int i=0; i<aSize; ++i ) {
         // VC8 does not properly align a temporary value; to work around, use explicit variable
         ClassWithVectorType foo(i);
         Array1[i] = foo;
     }
-    tbb::parallel_for( tbb::blocked_range<int>(0,N), SSE_Functor<ClassWithVectorType>(Array1, Array2) );
-    for( int i=0; i<N; ++i ) {
+    tbb::parallel_for( tbb::blocked_range<int>(0,aSize), SSE_Functor<ClassWithVectorType>(Array1, Array2) );
+    for( int i=0; i<aSize; ++i ) {
         ClassWithVectorType foo(i);
         ASSERT( Array2[i]==foo, NULL ) ;
     }
@@ -416,8 +410,9 @@ void TestVectorTypes() {
 #endif /* HAVE_m128 || HAVE_m256 */
 
 #include <vector>
-#include <tbb/blocked_range.h>
 #include <sstream>
+#include <tbb/blocked_range.h>
+
 struct TestSimplePartitionerStabilityFunctor:NoAssign{
   std::vector<int> & ranges;
   TestSimplePartitionerStabilityFunctor(std::vector<int> & theRanges):ranges(theRanges){}
@@ -525,6 +520,7 @@ void test() {
     const Body sync_body( sb );
     tbb::affinity_partitioner ap;
     tbb::parallel_for( range, sync_body, ap );
+    tbb::parallel_for( range, sync_body, tbb::static_partitioner() );
 }
 
 } // namespace uniform_distribution
@@ -578,6 +574,116 @@ void test() {
 
 } // namespace various_range_implementations
 
+#include <map>
+#include <utility>
+#include "tbb/task_arena.h"
+#include "tbb/enumerable_thread_specific.h"
+
+namespace parallel_for_within_task_arena {
+
+using namespace test_partitioner_utils::TestRanges;
+using tbb::split;
+using tbb::proportional_split;
+
+class BlockedRangeWhitebox;
+
+typedef std::pair<size_t, size_t> range_borders;
+typedef std::multimap<BlockedRangeWhitebox*, range_borders> MapType;
+typedef tbb::enumerable_thread_specific<MapType> ETSType;
+ETSType ets;
+
+class BlockedRangeWhitebox : public BlockedRange {
+public:
+    static const bool is_splittable_in_proportion = true;
+    BlockedRangeWhitebox(size_t _begin, size_t _end)
+        : BlockedRange(_begin, _end, NULL, false, false) { }
+
+    BlockedRangeWhitebox(BlockedRangeWhitebox& r, proportional_split& p)
+        :BlockedRange(r, p) {
+        update_ets(r);
+        update_ets(*this);
+    }
+
+    BlockedRangeWhitebox(BlockedRangeWhitebox& r, split)
+        :BlockedRange(r, split()) { }
+
+    void update_ets(BlockedRangeWhitebox& range) {
+        std::pair<MapType::iterator, MapType::iterator> equal_range = ets.local().equal_range(&range);
+        for (MapType::iterator it = equal_range.first; it != equal_range.second;++it) {
+            if (it->second.first <= range.begin() && range.end() <= it->second.second) {
+                ASSERT(!(it->second.first == range.begin() && it->second.second == range.end()), "Only one border of the range should be equal to the original");
+                it->second.first = range.begin();
+                it->second.second = range.end();
+                return;
+            }
+        }
+        ets.local().insert(std::make_pair<BlockedRangeWhitebox*, range_borders>(&range, range_borders(range.begin(), range.end())));
+    }
+};
+
+template <typename Partitioner>
+struct ArenaBody {
+    size_t range_begin;
+    size_t range_end;
+
+    ArenaBody(size_t _range_begin, size_t _range_end)
+        :range_begin(_range_begin), range_end(_range_end) { }
+
+    void operator()() const {
+        Partitioner my_partitioner;
+        tbb::parallel_for(BlockedRangeWhitebox(range_begin, range_end), test_partitioner_utils::SimpleBody(), my_partitioner);
+    }
+};
+
+struct CombineBody {
+    MapType operator()(MapType x, const MapType& y) const {
+        x.insert(y.begin(), y.end());
+        for (MapType::iterator it = x.begin(); it != x.end();++it)
+            for (MapType::iterator internal_it = x.begin(); internal_it != x.end(); ++internal_it) {
+                if (it != internal_it && internal_it->second.first <= it->second.first && it->second.second <= internal_it->second.second) {
+                    x.erase(internal_it);
+                    break;
+                }
+            }
+        return x;
+    }
+};
+
+range_borders combine_range(const MapType& map) {
+    range_borders result_range = map.begin()->second;
+    for (MapType::const_iterator it = map.begin(); it != map.end(); it++)
+        result_range = range_borders((std::min)(result_range.first, it->second.first), (std::max)(result_range.second, it->second.second));
+    return result_range;
+}
+
+template <typename Partitioner>
+void test_body() {
+    for (unsigned int num_threads = tbb::tbb_thread::hardware_concurrency() / 4 + 1; num_threads < tbb::tbb_thread::hardware_concurrency(); num_threads *= 2)
+        for (size_t range_begin = 0, range_end = num_threads * 10 - 1, i = 0; i < 3; range_begin += num_threads, range_end += num_threads + 1, ++i) {
+            ets = ETSType(MapType());
+            tbb::task_arena limited(num_threads);
+            limited.execute(ArenaBody<Partitioner>(range_begin, range_end));
+            MapType combined_map = ets.combine(CombineBody());
+            range_borders result_borders = combine_range(combined_map);
+            ASSERT(result_borders.first == range_begin, "Restored range begin does not match initial one");
+            ASSERT(result_borders.second == range_end, "Restored range end does not match initial one");
+            ASSERT((combined_map.size() == num_threads), "Incorrect number or post-proportional split ranges");
+            size_t expected_size = (range_end - range_begin) / num_threads;
+            for (MapType::iterator it = combined_map.begin(); it != combined_map.end(); ++it) {
+                size_t size = it->second.second - it->second.first;
+                ASSERT((size == expected_size || size == expected_size + 1), "Incorrect post-proportional range size");
+            }
+        }
+
+}
+
+void test() {
+    test_body<tbb::affinity_partitioner>();
+    test_body<tbb::static_partitioner>();
+}
+
+} // namespace parallel_for_within_task_arena
+
 int TestMain () {
     if( MinThread<1 ) {
         REPORT("number of threads must be positive\n");
@@ -603,6 +709,7 @@ int TestMain () {
             TestParallelForWithStepSupport<parallel_tag,unsigned long long>();
             TestParallelForWithStepSupport<parallel_tag,size_t>();
 
+#if TBB_PREVIEW_SERIAL_SUBSET
             // This is for testing serial implementation.
             if( p == MaxThread ) {
                 Flog<serial_tag,1>(p);
@@ -618,6 +725,7 @@ int TestMain () {
                 TestParallelForWithStepSupport<serial_tag,unsigned long long>();
                 TestParallelForWithStepSupport<serial_tag,size_t>();
             }
+#endif
 
 #if TBB_USE_EXCEPTIONS && !__TBB_THROW_ACROSS_MODULE_BOUNDARY_BROKEN
             TestExceptionsSupport();
@@ -648,6 +756,7 @@ int TestMain () {
 
     various_range_implementations::test();
     interaction_with_range_and_partitioner::test();
+    parallel_for_within_task_arena::test();
     return Harness::Done;
 }
 
