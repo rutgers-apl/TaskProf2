@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "harness_defs.h"
@@ -28,9 +28,6 @@
 #include "harness_allocator.h"
 #include <vector>
 #include "test_container_move_support.h"
-
-// std::is_copy_constructible<T>::value returns 'true' for non copyable type when MSVC compiler is used.
-#define __TBB_IS_COPY_CONSTRUCTIBLE_BROKEN ( _MSC_VER && (_MSC_VER <= 1700 || _MSC_VER <= 1800 && !__INTEL_COMPILER) )
 
 #if _MSC_VER==1500 && !__INTEL_COMPILER
     // VS2008/VC9 seems to have an issue; limits pull in math.h
@@ -81,19 +78,20 @@ public:
     }
 };
 
+#if TBB_USE_EXCEPTIONS
 class my_throwing_type : public my_data_type {
 public:
     static int throw_flag;
     my_throwing_type() : my_data_type() {}
-    my_throwing_type(const my_throwing_type& src) : my_data_type(src) { 
-        if (my_throwing_type::throw_flag) throw 42; 
+    my_throwing_type(const my_throwing_type& src) : my_data_type(src) {
+        if (my_throwing_type::throw_flag) throw 42;
         priority = src.priority;
     }
 };
-
 int my_throwing_type::throw_flag = 0;
 
 typedef concurrent_priority_queue<my_throwing_type, my_less > cpq_ex_test_type;
+#endif
 
 #if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT && __TBB_CPP11_RVALUE_REF_PRESENT
 const size_t push_selector_variants = 3;
@@ -122,7 +120,7 @@ class FillBody : NoAssign {
     T my_max, my_min;
     concurrent_priority_queue<T, C> *q;
     C less_than;
-public:  
+public:
     FillBody(int nThread_, T max_, T min_, concurrent_priority_queue<T, C> *q_) : nThread(nThread_), my_max(max_), my_min(min_), q(q_) {}
     void operator()(const int threadID) const {
         T elem = my_min + T(threadID);
@@ -162,8 +160,8 @@ class FloggerBody : NoAssign {
     int nThread;
     concurrent_priority_queue<T, C> *q;
 public:
-    FloggerBody(int nThread_, concurrent_priority_queue<T, C> *q_) : 
-        nThread(nThread_), q(q_) {}  
+    FloggerBody(int nThread_, concurrent_priority_queue<T, C> *q_) :
+        nThread(nThread_), q(q_) {}
     void operator()(const int threadID) const {
         T elem = T(threadID+1);
         for (size_t i=0; i<MAX_ITER; ++i) {
@@ -215,11 +213,25 @@ void TestHelpers(){
     TestToVector();
 }
 
+//Comparator with assert in default consructor
+template<typename T>
+class less_a : public std::less<T>
+{
+public:
+    explicit less_a(bool no_assert = false) {
+        ASSERT(no_assert,"empty consructor should not be called");
+    };
+};
+
 void TestConstructorsDestructorsAccessors() {
     std::vector<int> v;
     std::allocator<int> a;
     concurrent_priority_queue<int, std::less<int> > *q, *qo;
     concurrent_priority_queue<int, std::less<int>, std::allocator<int>  > *qi;
+
+    less_a<int> l(true);
+    concurrent_priority_queue<int, less_a<int> > *ql;
+    concurrent_priority_queue<int, less_a<int>, std::allocator<int>  > *qla;
 
     // Test constructors/destructors
     REMARK("Testing default constructor.\n");
@@ -230,7 +242,6 @@ void TestConstructorsDestructorsAccessors() {
     REMARK("Testing destructor.\n");
     delete q;
     REMARK("Destruction complete.\n");
-
     REMARK("Testing capacity constructor.\n");
     q = new concurrent_priority_queue<int, std::less<int> >(42);
     REMARK("Capacity constructor complete.\n");
@@ -249,6 +260,24 @@ void TestConstructorsDestructorsAccessors() {
     delete qi;
     REMARK("Destruction complete.\n");
 
+    REMARK("Testing compare constructor.\n");
+    ql = new concurrent_priority_queue<int, less_a<int> >(l);
+    REMARK("Compare constructor complete.\n");
+    ASSERT(ql->size()==0, "FAILED size test.");
+    ASSERT(ql->empty(), "FAILED empty test.");
+    REMARK("Testing destructor.\n");
+    delete ql;
+    REMARK("Destruction complete.\n");
+
+    REMARK("Testing compare+allocator constructor.\n");
+    qla = new concurrent_priority_queue<int, less_a<int>, std::allocator<int> >(l, a);
+    REMARK("Compare+allocator constructor complete.\n");
+    ASSERT(qla->size()==0, "FAILED size test.");
+    ASSERT(qla->empty(), "FAILED empty test.");
+    REMARK("Testing destructor.\n");
+    delete qla;
+    REMARK("Destruction complete.\n");
+
     REMARK("Testing capacity+allocator constructor.\n");
     qi = new concurrent_priority_queue<int, std::less<int>, std::allocator<int> >(42, a);
     REMARK("Capacity+allocator constructor complete.\n");
@@ -258,6 +287,25 @@ void TestConstructorsDestructorsAccessors() {
     delete qi;
     REMARK("Destruction complete.\n");
 
+    REMARK("Testing capacity+compare constructor.\n");
+    ql = new concurrent_priority_queue<int, less_a<int> >(42, l);
+    REMARK("Capacity+compare constructor complete.\n");
+    ASSERT(ql->size()==0, "FAILED size test.");
+    ASSERT(ql->empty(), "FAILED empty test.");
+    REMARK("Testing destructor.\n");
+    delete ql;
+    REMARK("Destruction complete.\n");
+
+    REMARK("Testing capacity+compare+allocator constructor.\n");
+    qla = new concurrent_priority_queue<int, less_a<int>, std::allocator<int> >(42, l, a);
+    REMARK("Capacity+compare+allocator constructor complete.\n");
+    ASSERT(qla->size()==0, "FAILED size test.");
+    ASSERT(qla->empty(), "FAILED empty test.");
+    REMARK("Testing destructor.\n");
+    delete qla;
+    REMARK("Destruction complete.\n");
+
+    REMARK("Destruction complete.\n");
     REMARK("Testing iterator filler constructor.\n");
     for (int i=0; i<42; ++i)
         v.push_back(i);
@@ -266,6 +314,16 @@ void TestConstructorsDestructorsAccessors() {
     ASSERT(q->size()==42, "FAILED vector/size test.");
     ASSERT(!q->empty(), "FAILED vector/empty test.");
     ASSERT(*q == v, "FAILED vector/equality test.");
+
+    REMARK("Destruction complete.\n");
+    REMARK("Testing iterator filler +compare constructor.\n");
+    ql = new concurrent_priority_queue<int, less_a<int> >(v.begin(), v.end(), l);
+    REMARK("Iterator filler +compare constructor complete.\n");
+    ASSERT(ql->size()==42, "FAILED vector/size test.");
+    ASSERT(!ql->empty(), "FAILED vector/empty test.");
+    REMARK("Testing destructor.\n");
+    delete ql;
+    REMARK("Destruction complete.\n");
 
     REMARK("Testing copy constructor.\n");
     qo = new concurrent_priority_queue<int, std::less<int> >(*q);
@@ -292,7 +350,7 @@ void TestAssignmentClearSwap() {
     qo = new cpq_type();
 
     REMARK("Testing assignment (1).\n");
-    *qo = *q; 
+    *qo = *q;
     REMARK("Assignment complete.\n");
     ASSERT(qo->size()==42, "FAILED assignment/size test.");
     ASSERT(!qo->empty(), "FAILED assignment/empty test.");
@@ -349,7 +407,7 @@ void TestSerialPushPop() {
     REMARK("Pushing complete.\n");
     ASSERT(q->size()==MAX_ITER, "FAILED push/size test.");
     ASSERT(!q->empty(), "FAILED push/empty test.");
-    
+
     REMARK("Testing serial pop.\n");
     while (!q->empty()) {
         ASSERT(q->try_pop(e), "FAILED pop test.");
@@ -378,7 +436,7 @@ void TestParallelPushPop(int nThreads, T t_max, T t_min, C /*compare*/) {
     qsize = q->size();
     ASSERT(q->size()==nThreads*MAX_ITER, "FAILED push/size test.");
     ASSERT(!q->empty(), "FAILED push/empty test.");
-    
+
     REMARK("Testing parallel pop.\n");
     NativeParallelFor(nThreads, emptier);
     REMARK("Popping complete.\n");
@@ -390,6 +448,7 @@ void TestParallelPushPop(int nThreads, T t_max, T t_min, C /*compare*/) {
 }
 
 void TestExceptions() {
+#if TBB_USE_EXCEPTIONS
     const size_t TOO_LARGE_SZ = 1000000000;
     my_throwing_type elem;
 
@@ -399,7 +458,10 @@ void TestExceptions() {
         my_throwing_type::throw_flag = 1;
         cpq_ex_test_type q;
     } catch(...) {
+#if !(_MSC_VER==1900)
         ASSERT(false, "FAILED: allocating empty queue should not throw exception.\n");
+        // VS2015 warns about the code in this catch block being unreachable
+#endif
     }
     // Allocate small queue should not throw for reasonably sized type
     try {
@@ -502,6 +564,7 @@ void TestExceptions() {
     }
     REMARK("Push exceptions testing complete.\n");
 #endif
+#endif // TBB_USE_EXCEPTIONS
 }
 
 template <typename T, typename C>
@@ -531,15 +594,15 @@ struct special_member_calls_t {
     size_t move_constructor_called_times;
     size_t copy_assignment_called_times;
     size_t move_assignment_called_times;
-    
+
     bool friend operator==(special_member_calls_t const& lhs, special_member_calls_t const& rhs){
-        return 
-                lhs.copy_constructor_called_times == rhs.copy_constructor_called_times 
+        return
+                lhs.copy_constructor_called_times == rhs.copy_constructor_called_times
              && lhs.move_constructor_called_times == rhs.move_constructor_called_times
              && lhs.copy_assignment_called_times == rhs.copy_assignment_called_times
              && lhs.move_assignment_called_times == rhs.move_assignment_called_times;
     }
-    
+
 };
 #if __TBB_CPP11_RVALUE_REF_PRESENT
 struct MoveOperationTracker {
@@ -805,9 +868,10 @@ void TestMoveSupportInPushPop() {
     ASSERT(o.value1 == 8 && o.value2 == 8, "Unexpected data popped; possible emplace() failure.");
     ASSERT(!q2.try_pop(o), "The queue should be empty.");
 
+    //TODO: revise this test
     concurrent_priority_queue<ForwardInEmplaceTester> q3;
     ASSERT( ForwardInEmplaceTester::moveCtorCalled == false, NULL );
-    q3.emplace( tbb::internal::move( ForwardInEmplaceTester(5) ), 2 );
+    q3.emplace( ForwardInEmplaceTester(5), 2 );
     ASSERT( ForwardInEmplaceTester::moveCtorCalled == true, "Not used std::forward in emplace()?" );
     ForwardInEmplaceTester obj( 0 );
     q3.try_pop( obj );
@@ -995,6 +1059,7 @@ void TypeTesterUniquePtr(const std::vector<T> &vec) {
     Examine</*isCopyCtor=*/false>(q1, q1Copy, vecSorted);
     Examine</*isCopyCtor=*/false>(q2, q2Copy, vecSorted);
 
+#if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
     Queue q3Copy;
     QueueDebugAlloc q4Copy;
 
@@ -1011,6 +1076,7 @@ void TypeTesterUniquePtr(const std::vector<T> &vec) {
     QueueDebugAlloc q4( std::move(q2) );
     Examine</*isCopyCtor=*/false>(q3, q3Copy, vecSorted);
     Examine</*isCopyCtor=*/false>(q4, q4Copy, vecSorted);
+#endif //__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
 }
 #endif /* __TBB_CPP11_SMART_POINTERS_PRESENT && __TBB_CPP11_RVALUE_REF_PRESENT && __TBB_CPP11_IS_COPY_CONSTRUCTIBLE_PRESENT */
 
@@ -1036,7 +1102,10 @@ void TestTypes() {
 
 #if __TBB_CPP11_SMART_POINTERS_PRESENT
     std::vector< std::shared_ptr<int> > arrShr;
-    for (int i = 0; i<NUMBER; ++i) arrShr.push_back(std::make_shared<int>(rnd.get()));
+    for (int i = 0; i<NUMBER; ++i) {
+        const int rnd_get = rnd.get();
+        arrShr.push_back(std::make_shared<int>(rnd_get));
+    }
     std::vector< std::weak_ptr<int> > arrWk;
     std::copy(arrShr.begin(), arrShr.end(), std::back_inserter(arrWk));
     TypeTester(arrShr, SmartPointersCompare());
@@ -1054,6 +1123,68 @@ void TestTypes() {
 #endif /* __TBB_CPP11_SMART_POINTERS_PRESENT */
 }
 
+#if __TBB_CPP17_DEDUCTION_GUIDES_PRESENT
+template <template <typename...>typename TQueue>
+void TestDeductionGuides() {
+    using ComplexType = const std::string*;
+    std::string s("s");
+    std::vector<ComplexType> v;
+    auto l = {ComplexType(&s), ComplexType(&s) };
+
+    // check TQueue(InputIterator, InputIterator)
+    TQueue qv(v.begin(), v.end());
+    static_assert(std::is_same<decltype(qv), TQueue<ComplexType> >::value);
+
+    // check TQueue(InputIterator, InputIterator, Allocator)
+    TQueue qva(v.begin(), v.end(), std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qva), TQueue<ComplexType, std::less<ComplexType>,
+        std::allocator<ComplexType>>>::value);
+
+    // check TQueue(InputIterator, InputIterator, Compare)
+    TQueue qvc(v.begin(), v.end(), less_a<ComplexType>(true));
+    static_assert(std::is_same<decltype(qvc), TQueue<ComplexType, less_a<ComplexType>>>::value);
+
+    // check TQueue(InputIterator, InputIterator, Compare, Allocator)
+    TQueue qvca(v.begin(), v.end(), less_a<ComplexType>(true), std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qvca), TQueue<ComplexType, less_a<ComplexType>,
+        std::allocator<ComplexType>>>::value);
+
+    // check TQueue(std::initializer_list)
+    TQueue ql(l);
+    static_assert(std::is_same<decltype(ql), TQueue<ComplexType>>::value);
+
+    // check TQueue(std::initializer_list, Allocator)
+    TQueue qla(l, std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qla), TQueue<ComplexType, std::less<ComplexType>,
+        std::allocator<ComplexType>>>::value);
+
+    // check TQueue(std::initializer_list, Compare)
+    TQueue qlc(l, less_a<ComplexType>(true));
+    static_assert(std::is_same<decltype(qlc), TQueue<ComplexType, less_a<ComplexType>>>::value);
+
+    // check TQueue(std::initializer_list, Compare, Allocator)
+    TQueue qlca(l, less_a<ComplexType>(true), std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qlca), TQueue<ComplexType, less_a<ComplexType>,
+        std::allocator<ComplexType>>>::value);
+
+    // check TQueue(TQueue &)
+    TQueue qc(qv);
+    static_assert(std::is_same<decltype(qv), decltype(qv)>::value);
+
+    // check TQueue(TQueue &, Allocator)
+    TQueue qca(qva, std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qca), decltype(qva)>::value);
+
+    // check TQueue(TQueue &&)
+    TQueue qm(std::move(qv));
+    static_assert(std::is_same<decltype(qm), decltype(qv)>::value);
+
+    // check TQueue(TQueue &&, Allocator)
+    TQueue qma(std::move(qva), std::allocator<ComplexType>());
+    static_assert(std::is_same<decltype(qma), decltype(qva)>::value);
+}
+#endif
+
 int TestMain() {
     if (MinThread < 1)
         MinThread = 1;
@@ -1066,6 +1197,10 @@ int TestMain() {
 #endif
 
     TestTypes();
+
+#if __TBB_CPP17_DEDUCTION_GUIDES_PRESENT
+    TestDeductionGuides<tbb::concurrent_priority_queue>();
+#endif
 
 #if __TBB_CPP11_RVALUE_REF_PRESENT
     TestgMoveConstructor();

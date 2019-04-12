@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 /* Container implementations in this header are based on PPL implementations
@@ -39,27 +39,15 @@ protected:
     typedef std::pair<const Key, T> value_type;
     typedef Key key_type;
     typedef Hash_compare hash_compare;
-    typedef typename Allocator::template rebind<value_type>::other allocator_type;
+    typedef typename tbb::internal::allocator_rebind<Allocator, value_type>::type allocator_type;
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+    typedef internal::node_handle<Key, value_type, Allocator> node_type;
+#endif // __TBB_UNORDERED_NODE_HANDLE_PRESENT
+
     enum { allow_multimapping = Allow_multimapping };
 
     concurrent_unordered_map_traits() : my_hash_compare() {}
     concurrent_unordered_map_traits(const hash_compare& hc) : my_hash_compare(hc) {}
-
-    class value_compare : public std::binary_function<value_type, value_type, bool>
-    {
-        friend class concurrent_unordered_map_traits<Key, T, Hash_compare, Allocator, Allow_multimapping>;
-
-    public:
-        bool operator()(const value_type& left, const value_type& right) const
-        {
-            return (my_hash_compare(left.first, right.first));
-        }
-
-        value_compare(const hash_compare& comparator) : my_hash_compare(comparator) {}
-
-    protected:
-        hash_compare my_hash_compare;    // the comparator predicate for keys
-    };
 
     template<class Type1, class Type2>
     static const Key& get_key(const std::pair<Type1, Type2>& value) {
@@ -68,6 +56,9 @@ protected:
 
     hash_compare my_hash_compare; // the comparator predicate for keys
 };
+
+template<typename Key, typename T, typename Hasher, typename Key_equality, typename Allocator>
+class concurrent_unordered_multimap;
 
 template <typename Key, typename T, typename Hasher = tbb::tbb_hash<Key>, typename Key_equality = std::equal_to<Key>,
          typename Allocator = tbb::tbb_allocator<std::pair<const Key, T> > >
@@ -109,24 +100,48 @@ public:
     typedef typename base_type::const_iterator const_iterator;
     typedef typename base_type::iterator local_iterator;
     typedef typename base_type::const_iterator const_local_iterator;
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+    typedef typename base_type::node_type node_type;
+#endif // __TBB_UNORDERED_NODE_HANDLE_PRESENT
 
     // Construction/destruction/copying
     explicit concurrent_unordered_map(size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets, key_compare(_Hasher, _Key_equality), a)
-    {
-    }
+        : base_type(n_of_buckets, key_compare(a_hasher, a_keyeq), a)
+    {}
 
-    concurrent_unordered_map(const Allocator& a) : base_type(base_type::initial_bucket_number, key_compare(), a)
-    {
-    }
+    concurrent_unordered_map(size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {}
+
+    concurrent_unordered_map(size_type n_of_buckets, const hasher& a_hasher, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
+    {}
+
+    explicit concurrent_unordered_map(const Allocator& a) : base_type(base_type::initial_bucket_number, key_compare(), a)
+    {}
 
     template <typename Iterator>
     concurrent_unordered_map(Iterator first, Iterator last, size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets, key_compare(_Hasher, _Key_equality), a)
+        : base_type(n_of_buckets, key_compare(a_hasher, a_keyeq), a)
+    {
+        insert(first, last);
+    }
+
+    template <typename Iterator>
+    concurrent_unordered_map(Iterator first, Iterator last, size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {
+        insert(first, last);
+    }
+
+    template <typename Iterator>
+    concurrent_unordered_map(Iterator first, Iterator last, size_type n_of_buckets, const hasher& a_hasher,
+        const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
     {
         insert(first, last);
     }
@@ -134,19 +149,33 @@ public:
 #if __TBB_INITIALIZER_LISTS_PRESENT
     //! Constructor from initializer_list
     concurrent_unordered_map(std::initializer_list<value_type> il, size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets, key_compare(_Hasher, _Key_equality), a)
+        : base_type(n_of_buckets, key_compare(a_hasher, a_keyeq), a)
     {
-        this->insert(il.begin(),il.end());
+        insert(il.begin(),il.end());
     }
+
+    concurrent_unordered_map(std::initializer_list<value_type> il, size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {
+        insert(il.begin(), il.end());
+    }
+
+    concurrent_unordered_map(std::initializer_list<value_type> il, size_type n_of_buckets, const hasher& a_hasher,
+        const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
+    {
+        insert(il.begin(), il.end());
+    }
+
 #endif //# __TBB_INITIALIZER_LISTS_PRESENT
 
-#if __TBB_CPP11_RVALUE_REF_PRESENT && __TBB_CPP11_IMPLICIT_MOVE_MEMBERS_GENERATION_FOR_DERIVED_BROKEN
+
+#if __TBB_CPP11_RVALUE_REF_PRESENT && !__TBB_IMPLICIT_MOVE_PRESENT
     concurrent_unordered_map(const concurrent_unordered_map& table)
         : base_type(table)
-    {
-    }
+    {}
 
     concurrent_unordered_map& operator=(const concurrent_unordered_map& table)
     {
@@ -155,25 +184,42 @@ public:
 
     concurrent_unordered_map(concurrent_unordered_map&& table)
         : base_type(std::move(table))
-    {
-    }
+    {}
 
     concurrent_unordered_map& operator=(concurrent_unordered_map&& table)
     {
         return static_cast<concurrent_unordered_map&>(base_type::operator=(std::move(table)));
     }
-#endif //__TBB_CPP11_IMPLICIT_MOVE_MEMBERS_GENERATION_FOR_DERIVED_BROKEN
-
-    concurrent_unordered_map(const concurrent_unordered_map& table, const Allocator& a)
-        : base_type(table, a)
-    {
-    }
+#endif //__TBB_CPP11_RVALUE_REF_PRESENT && !__TBB_IMPLICIT_MOVE_PRESENT
 
 #if __TBB_CPP11_RVALUE_REF_PRESENT
     concurrent_unordered_map(concurrent_unordered_map&& table, const Allocator& a) : base_type(std::move(table), a)
-    {
-    }
-#endif
+    {}
+#endif /*__TBB_CPP11_RVALUE_REF_PRESENT*/
+
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_map<Key, T, Hash, Equality, Allocator>& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_map<Key, T, Hash, Equality, Allocator>&& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_multimap<Key, T, Hash, Equality, Allocator>& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_multimap<Key, T, Hash, Equality, Allocator>&& source)
+              { this->internal_merge(source); }
+
+#endif //__TBB_UNORDERED_NODE_HANDLE_PRESENT
+
+    concurrent_unordered_map(const concurrent_unordered_map& table, const Allocator& a)
+        : base_type(table, a)
+    {}
+
     // Observers
     mapped_type& operator[](const key_type& key)
     {
@@ -211,6 +257,45 @@ public:
         return ((*where).second);
     }
 };
+
+#if __TBB_CPP17_DEDUCTION_GUIDES_PRESENT
+
+namespace internal {
+using namespace tbb::internal;
+
+template<template<typename...> typename Map, typename Key, typename Element, typename... Args>
+using cu_map_t = Map<
+    Key, Element,
+    std::conditional_t< (sizeof...(Args)>0) && !is_allocator_v< pack_element_t<0, Args...> >,
+                        pack_element_t<0, Args...>, tbb_hash<Key> >,
+    std::conditional_t< (sizeof...(Args)>1) && !is_allocator_v< pack_element_t<1, Args...> >,
+                        pack_element_t<1, Args...>, std::equal_to<Key> >,
+    std::conditional_t< (sizeof...(Args)>0) && is_allocator_v< pack_element_t<sizeof...(Args)-1, Args...> >,
+                        pack_element_t<sizeof...(Args)-1, Args...>, tbb_allocator<std::pair<const Key, Element> > >
+>;
+}
+
+// Deduction guide for the constructor from two iterators
+template<typename I>
+concurrent_unordered_map (I, I)
+-> internal::cu_map_t<concurrent_unordered_map, internal::iterator_key_t<I>, internal::iterator_mapped_t<I>>;
+
+// Deduction guide for the constructor from two iterators and hasher/equality/allocator
+template<typename I, typename... Args>
+concurrent_unordered_map(I, I, size_t, Args...)
+-> internal::cu_map_t<concurrent_unordered_map, internal::iterator_key_t<I>, internal::iterator_mapped_t<I>, Args...>;
+
+// Deduction guide for the constructor from an initializer_list
+template<typename Key, typename Element>
+concurrent_unordered_map(std::initializer_list<std::pair<const Key, Element>>)
+-> internal::cu_map_t<concurrent_unordered_map, Key, Element>;
+
+// Deduction guide for the constructor from an initializer_list and hasher/equality/allocator
+template<typename Key, typename Element, typename... Args>
+concurrent_unordered_map(std::initializer_list<std::pair<const Key, Element>>, size_t, Args...)
+-> internal::cu_map_t<concurrent_unordered_map, Key, Element, Args...>;
+
+#endif /* __TBB_CPP17_DEDUCTION_GUIDES_PRESENT */
 
 template < typename Key, typename T, typename Hasher = tbb::tbb_hash<Key>, typename Key_equality = std::equal_to<Key>,
         typename Allocator = tbb::tbb_allocator<std::pair<const Key, T> > >
@@ -250,24 +335,48 @@ public:
     typedef typename base_type::const_iterator const_iterator;
     typedef typename base_type::iterator local_iterator;
     typedef typename base_type::const_iterator const_local_iterator;
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+    typedef typename base_type::node_type node_type;
+#endif //__TBB_UNORDERED_NODE_HANDLE_PRESENT
 
     // Construction/destruction/copying
     explicit concurrent_unordered_multimap(size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets, key_compare(_Hasher, _Key_equality), a)
-    {
-    }
+        : base_type(n_of_buckets, key_compare(a_hasher, a_keyeq), a)
+    {}
 
-    concurrent_unordered_multimap(const Allocator& a) : base_type(base_type::initial_bucket_number, key_compare(), a)
-    {
-    }
+    concurrent_unordered_multimap(size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {}
+
+    concurrent_unordered_multimap(size_type n_of_buckets, const hasher& a_hasher, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
+    {}
+
+    explicit concurrent_unordered_multimap(const Allocator& a) : base_type(base_type::initial_bucket_number, key_compare(), a)
+    {}
 
     template <typename Iterator>
     concurrent_unordered_multimap(Iterator first, Iterator last, size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets,key_compare(_Hasher,_Key_equality), a)
+        : base_type(n_of_buckets,key_compare(a_hasher,a_keyeq), a)
+    {
+        insert(first, last);
+    }
+
+    template <typename Iterator>
+    concurrent_unordered_multimap(Iterator first, Iterator last, size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {
+        insert(first, last);
+    }
+
+    template <typename Iterator>
+    concurrent_unordered_multimap(Iterator first, Iterator last, size_type n_of_buckets, const hasher& a_hasher,
+        const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
     {
         insert(first, last);
     }
@@ -275,19 +384,32 @@ public:
 #if __TBB_INITIALIZER_LISTS_PRESENT
     //! Constructor from initializer_list
     concurrent_unordered_multimap(std::initializer_list<value_type> il, size_type n_of_buckets = base_type::initial_bucket_number,
-        const hasher& _Hasher = hasher(), const key_equal& _Key_equality = key_equal(),
+        const hasher& a_hasher = hasher(), const key_equal& a_keyeq = key_equal(),
         const allocator_type& a = allocator_type())
-        : base_type(n_of_buckets, key_compare(_Hasher, _Key_equality), a)
+        : base_type(n_of_buckets, key_compare(a_hasher, a_keyeq), a)
     {
-        this->insert(il.begin(),il.end());
+        insert(il.begin(),il.end());
     }
+
+    concurrent_unordered_multimap(std::initializer_list<value_type> il, size_type n_of_buckets, const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(hasher(), key_equal()), a)
+    {
+        insert(il.begin(), il.end());
+    }
+
+    concurrent_unordered_multimap(std::initializer_list<value_type> il, size_type n_of_buckets, const hasher& a_hasher,
+        const allocator_type& a)
+        : base_type(n_of_buckets, key_compare(a_hasher, key_equal()), a)
+    {
+        insert(il.begin(), il.end());
+    }
+
 #endif //# __TBB_INITIALIZER_LISTS_PRESENT
 
-#if __TBB_CPP11_RVALUE_REF_PRESENT && __TBB_CPP11_IMPLICIT_MOVE_MEMBERS_GENERATION_FOR_DERIVED_BROKEN
+#if __TBB_CPP11_RVALUE_REF_PRESENT && !__TBB_IMPLICIT_MOVE_PRESENT
     concurrent_unordered_multimap(const concurrent_unordered_multimap& table)
         : base_type(table)
-    {
-    }
+    {}
 
     concurrent_unordered_multimap& operator=(const concurrent_unordered_multimap& table)
     {
@@ -296,26 +418,66 @@ public:
 
     concurrent_unordered_multimap(concurrent_unordered_multimap&& table)
         : base_type(std::move(table))
-    {
-    }
+    {}
 
     concurrent_unordered_multimap& operator=(concurrent_unordered_multimap&& table)
     {
         return static_cast<concurrent_unordered_multimap&>(base_type::operator=(std::move(table)));
     }
-#endif //__TBB_CPP11_IMPLICIT_MOVE_MEMBERS_GENERATION_FOR_DERIVED_BROKEN
-
-    concurrent_unordered_multimap(const concurrent_unordered_multimap& table, const Allocator& a)
-        : base_type(table, a)
-    {
-    }
+#endif //__TBB_CPP11_RVALUE_REF_PRESENT && !__TBB_IMPLICIT_MOVE_PRESENT
 
 #if __TBB_CPP11_RVALUE_REF_PRESENT
     concurrent_unordered_multimap(concurrent_unordered_multimap&& table, const Allocator& a) : base_type(std::move(table), a)
-    {
-    }
-#endif
+    {}
+#endif /*__TBB_CPP11_RVALUE_REF_PRESENT*/
+
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_map<Key, T, Hash, Equality, Allocator>& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_map<Key, T, Hash, Equality, Allocator>&& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_multimap<Key, T, Hash, Equality, Allocator>& source)
+              { this->internal_merge(source); }
+
+    template<typename Hash, typename Equality>
+    void merge(concurrent_unordered_multimap<Key, T, Hash, Equality, Allocator>&& source)
+              { this->internal_merge(source); }
+
+#endif //__TBB_UNORDERED_NODE_HANDLE_PRESENT
+
+    concurrent_unordered_multimap(const concurrent_unordered_multimap& table, const Allocator& a)
+        : base_type(table, a)
+    {}
 };
+
+#if __TBB_CPP17_DEDUCTION_GUIDES_PRESENT
+
+// Deduction guide for the constructor from two iterators
+template<typename I>
+concurrent_unordered_multimap (I, I)
+-> internal::cu_map_t<concurrent_unordered_multimap, internal::iterator_key_t<I>, internal::iterator_mapped_t<I>>;
+
+// Deduction guide for the constructor from two iterators and hasher/equality/allocator
+template<typename I, typename... Args>
+concurrent_unordered_multimap(I, I, size_t, Args...)
+-> internal::cu_map_t<concurrent_unordered_multimap, internal::iterator_key_t<I>, internal::iterator_mapped_t<I>, Args...>;
+
+// Deduction guide for the constructor from an initializer_list
+template<typename Key, typename Element>
+concurrent_unordered_multimap(std::initializer_list<std::pair<const Key, Element>>)
+-> internal::cu_map_t<concurrent_unordered_multimap, Key, Element>;
+
+// Deduction guide for the constructor from an initializer_list and hasher/equality/allocator
+template<typename Key, typename Element, typename... Args>
+concurrent_unordered_multimap(std::initializer_list<std::pair<const Key, Element>>, size_t, Args...)
+-> internal::cu_map_t<concurrent_unordered_multimap, Key, Element, Args...>;
+
+#endif /* __TBB_CPP17_DEDUCTION_GUIDES_PRESENT */
 } // namespace interface5
 
 using interface5::concurrent_unordered_map;

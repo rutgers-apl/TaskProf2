@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef tbb_harness_test_cases_framework_H
@@ -28,16 +28,13 @@
 #undef DO_ITT_NOTIFY
 
 #include "harness.h"
-//#include "harness_report.h"
 #include "harness_assert.h"
-//#include "harness_allocator.h"
 #include "tbb/tbb_stddef.h"
 
 #include <cstdlib>
 
 #include <vector>
 #include <algorithm>
-
 #include <string>
 #include <sstream>
 #include <iostream>
@@ -48,6 +45,7 @@ namespace test_framework{
         test_class()();
     }
 
+#if TBB_USE_EXCEPTIONS
     struct assertion_failure:std::exception{
         const char* my_filename;
         int my_line;
@@ -59,7 +57,7 @@ namespace test_framework{
              my_expression(expression),
              my_comment(comment)
         {}
-        virtual const char* what() const throw(){
+        virtual const char* what() const throw() __TBB_override {
             return "test assertion failed";
         }
     };
@@ -67,6 +65,8 @@ namespace test_framework{
     void throw_assertion_failure(const char* filename, int line, const char* expression, const char * comment){
         throw assertion_failure(filename, line, expression, comment);
     }
+#endif // TBB_USE_EXCEPTIONS
+
     class test_suite{
         typedef void(*run_test_function_pointer_type)();
         typedef std::pair<std::string, run_test_function_pointer_type> tc_record_pair;
@@ -80,12 +80,16 @@ namespace test_framework{
             std::stringstream str;
             size_t failed=0;
             for (size_t i=0;i<test_cases.size();++i){
+#if TBB_USE_EXCEPTIONS
                 try{
                     (test_cases[i].second)();
                 }catch(std::exception& e){
                     failed++;
                     str<<"test case \""<<test_cases[i].first<<"\" failed with exception. what():\""<<e.what()<<"\""<<std::endl;
                 }
+#else
+                    (test_cases[i].second)();
+#endif
             }
             if (!silent) {
                 str<<test_cases.size()<<" test cases are run; "<<failed<<" failed"<<std::endl;
@@ -220,9 +224,11 @@ namespace test_framework_unit_tests{
 }
 
 int TestMain (){
+#if TBB_USE_EXCEPTIONS
     SetHarnessErrorProcessing(test_framework::throw_assertion_failure);
     //TODO: deal with assertions during stack unwinding
     //tbb::set_assertion_handler( test_framework::throw_assertion_failure );
+#endif
     {
         test_framework_unit_tests::run_all_test();
     }

@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 /* Common part for the partitioner whitebox tests */
@@ -28,6 +28,7 @@
 #include "string.h"
 #include "harness_assert.h"
 #include "test_partitioner.h"
+#include <numeric>
 
 #if TBB_USE_DEBUG
 // reducing number of simulations due to test timeout
@@ -39,6 +40,11 @@ const size_t max_simulated_threads = 640;
 typedef tbb::enumerable_thread_specific<size_t> ThreadNumsType;
 size_t g_threadNumInitialValue = 10;
 ThreadNumsType g_threadNums(g_threadNumInitialValue);
+
+namespace whitebox_simulation {
+size_t whitebox_thread_index = 0;
+test_partitioner_utils::BinaryTree reference_tree;
+}
 
 // simulate a subset of task.h
 namespace tbb {
@@ -64,9 +70,16 @@ private:
     fake_task *my_parent;
     affinity_id my_affinity;
 };
+namespace task_arena {
+static const int not_initialized = -2;//should match corresponding value in task_arena.h
+}//namespace task_arena
+namespace this_task_arena {
+inline int current_thread_index() { return (int)whitebox_simulation::whitebox_thread_index; }
 }
+}//namespace tbb
 
 #define __TBB_task_H
+#define __TBB_task_arena_H
 #define get_initial_auto_partitioner_divisor my_get_initial_auto_partitioner_divisor
 #define affinity_partitioner_base_v3 my_affinity_partitioner_base_v3
 #define task fake_task
@@ -108,7 +121,7 @@ void my_affinity_partitioner_base_v3::resize( unsigned factor ) {
 
 } //namespace internal
 // simulate a subset of parallel_for
-namespace interface7 {
+namespace interface9 {
 namespace internal {
 
 // parallel_for algorithm that executes sequentially
@@ -169,7 +182,7 @@ public:
         my_partition.set_affinity(*this);
         my_partition.align_depth( d );
     }
-    fake_task* execute() {
+    fake_task* execute() __TBB_override {
         my_partition.check_being_stolen( *this );
         size_t origBegin = my_range.begin();
         size_t origEnd = my_range.end();
@@ -215,11 +228,11 @@ public:
 };
 
 } //namespace internal
-} //namespace interface7
+} //namespace interfaceX
 } //namespace tbb
 
 namespace whitebox_simulation {
-using namespace tbb::interface7::internal;
+using namespace tbb::interface9::internal;
 template<typename Range, typename Body, typename Partitioner>
 void parallel_for( const Range& range, const Body& body, Partitioner& partitioner,
                    test_partitioner_utils::BinaryTree* tree = NULL) {
@@ -310,9 +323,9 @@ public:
             uint64_t disparity =
                 max(stat.m_rangeNum, settings->thread_num) - min(stat.m_rangeNum, settings->thread_num);
             if (disparity > settings->above_threads_size_tolerance) {
-                REPORT("ERROR: '%s (f=%d|e=%d)': |#ranges-#threads|=%llu > %llu=tolerance\n",
-                    rangeName, int(settings->provide_feedback), int(settings->ensure_non_empty_size),
-                    disparity, uint64_t(settings->above_threads_size_tolerance));
+                REPORT("ERROR: '%s (f=%d|e=%d)': |#ranges(%llu)-#threads(%llu)|=%llu > %llu=tolerance\n",
+                    rangeName, int(settings->provide_feedback), int(settings->ensure_non_empty_size), stat.m_rangeNum,
+                    settings->thread_num, disparity, uint64_t(settings->above_threads_size_tolerance));
                 ASSERT(disparity <= settings->above_threads_size_tolerance, "Incorrect number of range "
                     "objects was created before work balancing phase started");
             }
@@ -360,7 +373,7 @@ public:
 protected:
     size_t m_parallel_group_thread_starting_index; // starting index of thread
 
-    template <typename Range, typename T>
+    template <typename Range, typename Partitioner, typename T>
     void test(use_case_settings_t& settings, T factors[], size_t (*rsgFunc)(T*, unsigned, size_t)
         = &default_range_size_generator<T>) const
     {
@@ -370,8 +383,8 @@ protected:
                 /*maximal size of range=*/ 0, /*minimal size of range was not rewritten yet=*/ false };
             Range range = Range(settings.range_begin, range_end, &stat, settings.provide_feedback,
                                 settings.ensure_non_empty_size);
-            tbb::affinity_partitioner ap;
-            test_case(range, SimpleBody(), ap, NULL);
+            Partitioner my_partitioner;
+            test_case(range, SimpleBody(), my_partitioner, NULL);
             size_t range_size = range_end - settings.range_begin;
             const char* rangeName = typeid(range).name();
             settings.checker(rangeName, range_size, &settings, stat);
@@ -391,6 +404,68 @@ void test() {
     }
     NativeParallelFor(max_simulated_threads - parallel_group_thread_starting_index,
         ParallelTestBody(parallel_group_thread_starting_index));
+}
+
+namespace task_affinity_whitebox {
+size_t range_begin = 0;
+size_t range_end = 20;
+}
+
+template<typename Partitioner>
+void check_tree(const test_partitioner_utils::BinaryTree&);
+
+template<>
+void check_tree<tbb::affinity_partitioner>(const test_partitioner_utils::BinaryTree& tree) {
+    ASSERT(tree == whitebox_simulation::reference_tree,
+        "affinity_partitioner distributes tasks differently from run to run");
+}
+
+template<>
+void check_tree<tbb::static_partitioner>(const test_partitioner_utils::BinaryTree& tree) {
+    std::vector<test_partitioner_utils::TreeNode* > tree_leafs;
+    tree.fill_leafs(tree_leafs);
+    typedef std::vector<size_t> Slots;
+    Slots affinity_slots(tree_leafs.size() + 1, 0);
+
+    for (std::vector<test_partitioner_utils::TreeNode*>::iterator i = tree_leafs.begin(); i != tree_leafs.end(); ++i) {
+        affinity_slots[(*i)->m_affinity]++;
+        if ((*i)->m_affinity == 0)
+            ASSERT((*i)->m_range_begin == task_affinity_whitebox::range_begin,
+                "Task with affinity 0 was executed with wrong range");
+    }
+
+    typedef std::iterator_traits<Slots::iterator>::difference_type slots_difference_type;
+    ASSERT(std::count(affinity_slots.begin(), affinity_slots.end(), size_t(0)) == slots_difference_type(1),
+        "static_partitioner incorrectly distributed tasks by threads");
+    ASSERT(std::count(affinity_slots.begin(), affinity_slots.end(), size_t(1)) == slots_difference_type(g_threadNums.local()),
+        "static_partitioner incorrectly distributed tasks by threads");
+    ASSERT(affinity_slots[tbb::this_task_arena::current_thread_index() + 1] == 0,
+        "static_partitioner incorrectly assigns task with 0 affinity");
+    ASSERT(std::accumulate(affinity_slots.begin(), affinity_slots.end(), size_t(0)) == g_threadNums.local(),
+        "static_partitioner has created more tasks than the number of threads");
+}
+
+template<typename Partitioner>
+void test_task_affinity() {
+    using namespace task_affinity_whitebox;
+    test_partitioner_utils::SimpleBody body;
+    for (size_t p = 1; p <= 50; ++p) {
+        g_threadNums.local() = p;
+        whitebox_simulation::whitebox_thread_index = 0;
+        test_partitioner_utils::TestRanges::BlockedRange range(range_begin, range_end, /*statData*/NULL,
+                                            /*provide_feedback*/false, /*ensure_non_empty_size*/false);
+        Partitioner partitioner;
+        whitebox_simulation::reference_tree = test_partitioner_utils::BinaryTree();
+        whitebox_simulation::parallel_for(range, body, partitioner, &(whitebox_simulation::reference_tree));
+        while (whitebox_simulation::whitebox_thread_index < p) {
+            test_partitioner_utils::BinaryTree tree;
+            whitebox_simulation::parallel_for(range, body, partitioner, &tree);
+            check_tree<Partitioner>(tree);
+            whitebox_simulation::whitebox_thread_index++;
+        }
+        range_begin++;
+        range_end += 2;
+    }
 }
 
 } /* namespace uniform_iterations_distribution */

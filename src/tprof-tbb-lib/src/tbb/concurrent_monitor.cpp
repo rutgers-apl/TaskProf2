@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "concurrent_monitor.h"
@@ -36,9 +36,9 @@ concurrent_monitor::~concurrent_monitor() {
 void concurrent_monitor::prepare_wait( thread_context& thr, uintptr_t ctx ) {
     if( !thr.ready )
         thr.init();
-    // this is good place to pump previous spurious wakeup
-    else if( thr.spurious ) {
-        thr.spurious = false;
+    // this is good place to pump previous skipped wakeup
+    else if( thr.skipped_wakeup ) {
+        thr.skipped_wakeup = false;
         thr.semaphore().P();
     }
     thr.context = ctx;
@@ -52,18 +52,17 @@ void concurrent_monitor::prepare_wait( thread_context& thr, uintptr_t ctx ) {
 }
 
 void concurrent_monitor::cancel_wait( thread_context& thr ) {
-    // spurious wakeup will be pumped in the following prepare_wait()
-    thr.spurious = true;
+    // possible skipped wakeup will be pumped in the following prepare_wait()
+    thr.skipped_wakeup = true;
     // try to remove node from waitset
     bool th_in_waitset = thr.in_waitset;
     if( th_in_waitset ) {
         tbb::spin_mutex::scoped_lock l( mutex_ec );
         if (thr.in_waitset) {
-            // successfully removed from waitset,
-            // so there will be no spurious wakeup
-            thr.in_waitset = false;
-            thr.spurious = false;
             waitset_ec.remove( (waitset_t::node_t&)thr );
+            // node is removed from waitset, so there will be no wakeup
+            thr.in_waitset = false;
+            thr.skipped_wakeup = false;
         }
     }
 }
@@ -89,7 +88,7 @@ void concurrent_monitor::notify_one_relaxed() {
 void concurrent_monitor::notify_all_relaxed() {
     if( waitset_ec.empty() )
         return;
-    dllist_t temp;
+    waitset_t temp;
     const waitset_node_t* end;
     {
         tbb::spin_mutex::scoped_lock l( mutex_ec );
@@ -112,7 +111,7 @@ void concurrent_monitor::notify_all_relaxed() {
 void concurrent_monitor::abort_all_relaxed() {
     if( waitset_ec.empty() )
         return;
-    dllist_t temp;
+    waitset_t temp;
     const waitset_node_t* end;
     {
         tbb::spin_mutex::scoped_lock l( mutex_ec );

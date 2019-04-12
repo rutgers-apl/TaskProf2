@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "tbb/tbb_config.h"
@@ -31,8 +31,6 @@
 #else
 #include <dlfcn.h>
 #endif /* _WIN32||_WIN64 */
-
-using namespace std;
 
 #if __TBB_WEAK_SYMBOLS_PRESENT
 
@@ -104,7 +102,7 @@ static const dynamic_link_descriptor MallocLinkTable[] = {
 #define MALLOCLIB_NAME "tbbmalloc" DEBUG_SUFFIX ".dll"
 #elif __APPLE__
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX ".dylib"
-#elif __FreeBSD__ || __NetBSD__ || __sun || _AIX || __ANDROID__
+#elif __FreeBSD__ || __NetBSD__ || __OpenBSD__ || __sun || _AIX || __ANDROID__
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX ".so"
 #elif __linux__  // Note that order of these #elif's is important!
 #define MALLOCLIB_NAME "libtbbmalloc" DEBUG_SUFFIX  __TBB_STRING(.so.TBB_COMPATIBLE_INTERFACE_VERSION)
@@ -124,8 +122,8 @@ void initialize_handler_pointers() {
         // This must be done now, and not before FillDynamicLinks runs, because if other
         // threads call the handlers, we want them to go through the DoOneTimeInitializations logic,
         // which forces them to wait.
-        FreeHandler = &free;
-        MallocHandler = &malloc;
+        FreeHandler = &std::free;
+        MallocHandler = &std::malloc;
         padded_allocate_handler = &padded_allocate;
         padded_free_handler = &padded_free;
     }
@@ -165,8 +163,9 @@ static void dummy_padded_free( void * ptr ) {
     initialize_cache_aligned_allocator();
     __TBB_ASSERT( padded_free_handler!=&dummy_padded_free, NULL );
     (*padded_free_handler)( ptr );
-}    
+}
 
+// TODO: use CPUID to find actual line size, though consider backward compatibility
 static size_t NFS_LineSize = 128;
 
 size_t NFS_GetLineSize() {
@@ -179,23 +178,24 @@ size_t NFS_GetLineSize() {
 #endif
 
 void* NFS_Allocate( size_t n, size_t element_size, void* /*hint*/ ) {
-    size_t m = NFS_LineSize;
-    __TBB_ASSERT( m<=NFS_MaxLineSize, "illegal value for NFS_LineSize" );
-    __TBB_ASSERT( (m & (m-1))==0, "must be power of two" );
+    //TODO: make this functionality  available via an adaptor over generic STL like allocator
+    const size_t nfs_cache_line_size = NFS_LineSize;
+    __TBB_ASSERT( nfs_cache_line_size <= NFS_MaxLineSize, "illegal value for NFS_LineSize" );
+    __TBB_ASSERT( is_power_of_two(nfs_cache_line_size), "must be power of two" );
     size_t bytes = n*element_size;
 
-    if (bytes<n || bytes+m<bytes) {
+    if (bytes<n || bytes+nfs_cache_line_size<bytes) {
         // Overflow
         throw_exception(eid_bad_alloc);
     }
     // scalable_aligned_malloc considers zero size request an error, and returns NULL
     if (bytes==0) bytes = 1;
-    
-    void* result = (*padded_allocate_handler)( bytes, m );
+
+    void* result = (*padded_allocate_handler)( bytes, nfs_cache_line_size );
     if (!result)
         throw_exception(eid_bad_alloc);
 
-    __TBB_ASSERT( ((size_t)result&(m-1)) == 0, "The address returned isn't aligned to cache line size" );
+    __TBB_ASSERT( is_aligned(result, nfs_cache_line_size), "The address returned isn't aligned to cache line size" );
     return result;
 }
 
@@ -203,16 +203,16 @@ void NFS_Free( void* p ) {
     (*padded_free_handler)( p );
 }
 
-static void* padded_allocate( size_t bytes, size_t alignment ) {    
+static void* padded_allocate( size_t bytes, size_t alignment ) {
     unsigned char* result = NULL;
-    unsigned char* base = (unsigned char*)malloc(alignment+bytes);
-    if( base ) {        
+    unsigned char* base = (unsigned char*)std::malloc(alignment+bytes);
+    if( base ) {
         // Round up to the next line
         result = (unsigned char*)((uintptr_t)(base+alignment)&-alignment);
         // Record where block actually starts.
         ((uintptr_t*)result)[-1] = uintptr_t(base);
     }
-    return result;    
+    return result;
 }
 
 static void padded_free( void* p ) {
@@ -221,11 +221,11 @@ static void padded_free( void* p ) {
         // Recover where block actually starts
         unsigned char* base = ((unsigned char**)p)[-1];
         __TBB_ASSERT( (void*)((uintptr_t)(base+NFS_LineSize)&-NFS_LineSize)==p, "not allocated by NFS_Allocate?" );
-        free(base);
+        std::free(base);
     }
 }
 
-void* __TBB_EXPORTED_FUNC allocate_via_handler_v3( size_t n ) {    
+void* __TBB_EXPORTED_FUNC allocate_via_handler_v3( size_t n ) {
     void* result = (*MallocHandler) (n);
     if (!result) {
         throw_exception(eid_bad_alloc);
@@ -234,7 +234,7 @@ void* __TBB_EXPORTED_FUNC allocate_via_handler_v3( size_t n ) {
 }
 
 void __TBB_EXPORTED_FUNC deallocate_via_handler_v3( void *p ) {
-    if( p ) {        
+    if( p ) {
         (*FreeHandler)( p );
     }
 }
@@ -246,9 +246,9 @@ bool __TBB_EXPORTED_FUNC is_malloc_used_v3() {
     }
     __TBB_ASSERT( MallocHandler!=&DummyMalloc && FreeHandler!=&DummyFree, NULL );
     // Cast to void avoids type mismatch errors on some compilers (e.g. __IBMCPP__)
-    __TBB_ASSERT( !(((void*)MallocHandler==(void*)&malloc) ^ ((void*)FreeHandler==(void*)&free)),
+    __TBB_ASSERT( !(((void*)MallocHandler==(void*)&std::malloc) ^ ((void*)FreeHandler==(void*)&std::free)),
                   "Both shim pointers must refer to routines from the same package (either TBB or CRT)" );
-    return (void*)MallocHandler == (void*)&malloc;
+    return (void*)MallocHandler == (void*)&std::malloc;
 }
 
 } // namespace internal

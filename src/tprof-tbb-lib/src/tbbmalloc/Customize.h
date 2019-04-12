@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef _TBB_malloc_Customize_H_
@@ -24,12 +24,13 @@
 // customizing MALLOC_ASSERT macro
 #include "tbb/tbb_stddef.h"
 #define MALLOC_ASSERT(assertion, message) __TBB_ASSERT(assertion, message)
+#define MALLOC_ASSERT_EX(assertion, message) __TBB_ASSERT_EX(assertion, message)
 
 #ifndef MALLOC_DEBUG
 #define MALLOC_DEBUG TBB_USE_DEBUG
 #endif
 
-#include "tbb/tbb_machine.h"
+#include "Synchronize.h"
 
 #if DO_ITT_NOTIFY
 #include "tbb/itt_notify.h"
@@ -46,81 +47,6 @@
 #define MALLOC_ITT_FINI_ITTLIB()        ((void)0)
 #endif
 
-//! Stripped down version of spin_mutex.
-/** Instances of MallocMutex must be declared in memory that is zero-initialized.
-    There are no constructors.  This is a feature that lets it be
-    used in situations where the mutex might be used while file-scope constructors
-    are running.
-
-    There are no methods "acquire" or "release".  The scoped_lock must be used
-    in a strict block-scoped locking pattern.  Omitting these methods permitted
-    further simplification. */
-class MallocMutex : tbb::internal::no_copy {
-    __TBB_atomic_flag flag;
-
-public:
-    class scoped_lock : tbb::internal::no_copy {
-        MallocMutex& mutex;
-        bool taken;
-    public:
-        scoped_lock( MallocMutex& m ) : mutex(m), taken(true) { __TBB_LockByte(m.flag); }
-        scoped_lock( MallocMutex& m, bool block, bool *locked ) : mutex(m), taken(false) {
-            if (block) {
-                __TBB_LockByte(m.flag);
-                taken = true;
-            } else {
-                taken = __TBB_TryLockByte(m.flag);
-            }
-            if (locked) *locked = taken;
-        }
-        ~scoped_lock() {
-            if (taken) __TBB_UnlockByte(mutex.flag);
-        }
-    };
-    friend class scoped_lock;
-};
-
-// TODO: use signed/unsigned in atomics more consistently
-inline intptr_t AtomicIncrement( volatile intptr_t& counter ) {
-    return __TBB_FetchAndAddW( &counter, 1 )+1;
-}
-
-inline uintptr_t AtomicAdd( volatile intptr_t& counter, intptr_t value ) {
-    return __TBB_FetchAndAddW( &counter, value );
-}
-
-inline intptr_t AtomicCompareExchange( volatile intptr_t& location, intptr_t new_value, intptr_t comparand) {
-    return __TBB_CompareAndSwapW( &location, new_value, comparand );
-}
-
-inline uintptr_t AtomicFetchStore(volatile void* location, uintptr_t value) {
-    return __TBB_FetchAndStoreW(location, value);
-}
-
-inline void AtomicOr(volatile void *operand, uintptr_t addend) {
-    __TBB_AtomicOR(operand, addend);
-}
-
-inline void AtomicAnd(volatile void *operand, uintptr_t addend) {
-    __TBB_AtomicAND(operand, addend);
-}
-
-inline intptr_t FencedLoad( const volatile intptr_t &location ) {
-    return __TBB_load_with_acquire(location);
-}
-
-inline void FencedStore( volatile intptr_t &location, intptr_t value ) {
-    __TBB_store_with_release(location, value);
-}
-
-inline void SpinWaitWhileEq(const volatile intptr_t &location, const intptr_t value) {
-    tbb::internal::spin_wait_while_eq(location, value);
-}
-
-inline void SpinWaitUntilEq(const volatile intptr_t &location, const intptr_t value) {
-    tbb::internal::spin_wait_until_eq(location, value);
-}
-
 inline intptr_t BitScanRev(uintptr_t x) {
     return !x? -1 : __TBB_Log2(x);
 }
@@ -133,8 +59,8 @@ static inline bool isAligned(T* arg, uintptr_t alignment) {
 static inline bool isPowerOfTwo(uintptr_t arg) {
     return tbb::internal::is_power_of_two(arg);
 }
-static inline bool isPowerOfTwoMultiple(uintptr_t arg, uintptr_t divisor) {
-    return arg && tbb::internal::is_power_of_two_factor(arg,divisor);
+static inline bool isPowerOfTwoAtLeast(uintptr_t arg, uintptr_t power2) {
+    return arg && tbb::internal::is_power_of_two_at_least(arg,power2);
 }
 
 #define MALLOC_STATIC_ASSERT(condition,msg) __TBB_STATIC_ASSERT(condition,msg)
@@ -193,7 +119,7 @@ namespace tbb {
 #if TBB_USE_THREADING_TOOLS
             call_itt_notify(releasing, &dst);
 #endif // TBB_USE_THREADING_TOOLS
-            FencedStore(*(intptr_t*)&dst, src); 
+            FencedStore(*(intptr_t*)&dst, src);
         }
 
         template <typename T>

@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef _TBB_ITT_NOTIFY
@@ -58,7 +58,7 @@ namespace tbb {
     //! Unicode character type. Always wchar_t on Windows.
     /** We do not use typedefs from Windows TCHAR family to keep consistence of TBB coding style. **/
     typedef wchar_t tchar;
-    //! Standard Windows macro to markup the string literals. 
+    //! Standard Windows macro to markup the string literals.
     #define _T(string_literal) L ## string_literal
 #else /* !WIN */
     typedef char tchar;
@@ -70,11 +70,11 @@ namespace tbb {
 #if DO_ITT_NOTIFY
 namespace tbb {
     //! Display names of internal synchronization types
-    extern const tchar 
+    extern const tchar
             *SyncType_GlobalLock,
             *SyncType_Scheduler;
     //! Display names of internal synchronization components/scenarios
-    extern const tchar 
+    extern const tchar
             *SyncObj_SchedulerInitialization,
             *SyncObj_SchedulersList,
             *SyncObj_WorkerLifeCycleMgmt,
@@ -85,11 +85,14 @@ namespace tbb {
             *SyncObj_Mailbox,
             *SyncObj_TaskReturnList,
             *SyncObj_TaskStream,
+#if __TBB_PREVIEW_CRITICAL_TASKS
+            *SyncObj_CriticalTaskStream,
+#endif
             *SyncObj_ContextsList
             ;
 
     namespace internal {
-        void __TBB_EXPORTED_FUNC itt_set_sync_name_v3( void* obj, const tchar* name); 
+        void __TBB_EXPORTED_FUNC itt_set_sync_name_v3( void* obj, const tchar* name);
 
     } // namespace internal
 
@@ -108,6 +111,10 @@ namespace tbb {
 #define ITT_STACK(precond, name, obj)      ((void)0)
 #endif /* !__TBB_TASK_GROUP_CONTEXT */
 
+#define ITT_TASK_GROUP(obj,name,parent)     itt_make_task_group_v7(internal::ITT_DOMAIN_MAIN,(void*)(obj),ALGORITHM,(void*)(parent),(parent!=NULL) ? ALGORITHM : FLOW_NULL,name)
+#define ITT_TASK_BEGIN(obj,name,id)         itt_task_begin_v7(internal::ITT_DOMAIN_MAIN,(void*)(id),ALGORITHM,(void*)(obj),ALGORITHM,name)
+#define ITT_TASK_END                        itt_task_end_v7(internal::ITT_DOMAIN_MAIN)
+
 #else /* !DO_ITT_NOTIFY */
 
 #define ITT_NOTIFY(name,obj)            ((void)0)
@@ -117,6 +124,10 @@ namespace tbb {
 #define ITT_SYNC_RENAME(obj, name)      ((void)0)
 #define ITT_STACK_CREATE(obj)           ((void)0)
 #define ITT_STACK(precond, name, obj)   ((void)0)
+
+#define ITT_TASK_GROUP(type,name,parent)    ((void)0)
+#define ITT_TASK_BEGIN(type,name,id)        ((void)0)
+#define ITT_TASK_END                        ((void)0)
 
 #endif /* !DO_ITT_NOTIFY */
 

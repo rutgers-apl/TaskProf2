@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef __TBB_scalable_allocator_H
@@ -129,6 +129,7 @@ namespace rml {
 class MemoryPool;
 
 typedef void *(*rawAllocType)(intptr_t pool_id, size_t &bytes);
+// returns non-zero in case of error
 typedef int   (*rawFreeType)(intptr_t pool_id, void* raw_ptr, size_t raw_bytes);
 
 /*
@@ -191,7 +192,10 @@ void *pool_aligned_malloc(MemoryPool* mPool, size_t size, size_t alignment);
 void *pool_aligned_realloc(MemoryPool* mPool, void *ptr, size_t size, size_t alignment);
 bool  pool_reset(MemoryPool* memPool);
 bool  pool_free(MemoryPool *memPool, void *object);
-}
+MemoryPool *pool_identify(void *object);
+size_t pool_msize(MemoryPool *memPool, void *object);
+
+} // namespace rml
 
 #include <new>      /* To use new with the placement argument */
 
@@ -205,7 +209,11 @@ bool  pool_free(MemoryPool *memPool, void *object);
 #endif
 
 #if __TBB_ALLOCATOR_CONSTRUCT_VARIADIC
- #include <utility> // std::forward
+#include <utility> // std::forward
+#endif
+
+#if __TBB_CPP17_MEMORY_RESOURCE_PRESENT
+#include <memory_resource>
 #endif
 
 namespace tbb {
@@ -215,6 +223,23 @@ namespace tbb {
     #pragma warning (push)
     #pragma warning (disable: 4100)
 #endif
+
+//! @cond INTERNAL
+namespace internal {
+
+#if TBB_USE_EXCEPTIONS
+// forward declaration is for inlining prevention
+template<typename E> __TBB_NOINLINE( void throw_exception(const E &e) );
+#endif
+
+// keep throw in a separate function to prevent code bloat
+template<typename E>
+void throw_exception(const E &e) {
+    __TBB_THROW(e);
+}
+
+} // namespace internal
+//! @endcond
 
 //! Meets "allocator" requirements of ISO C++ Standard, Section 20.1.5
 /** The members are ordered the same way they are in section 20.4.1
@@ -243,7 +268,10 @@ public:
 
     //! Allocate space for n objects.
     pointer allocate( size_type n, const void* /*hint*/ =0 ) {
-        return static_cast<pointer>( scalable_malloc( n * sizeof(value_type) ) );
+        pointer p = static_cast<pointer>( scalable_malloc( n * sizeof(value_type) ) );
+        if (!p)
+            internal::throw_exception(std::bad_alloc());
+        return p;
     }
 
     //! Free previously allocated block of memory
@@ -260,18 +288,18 @@ public:
     template<typename U, typename... Args>
     void construct(U *p, Args&&... args)
         { ::new((void *)p) U(std::forward<Args>(args)...); }
-#else // __TBB_ALLOCATOR_CONSTRUCT_VARIADIC
+#else /* __TBB_ALLOCATOR_CONSTRUCT_VARIADIC */
 #if __TBB_CPP11_RVALUE_REF_PRESENT
     void construct( pointer p, value_type&& value ) { ::new((void*)(p)) value_type( std::move( value ) ); }
 #endif
     void construct( pointer p, const value_type& value ) {::new((void*)(p)) value_type(value);}
-#endif // __TBB_ALLOCATOR_CONSTRUCT_VARIADIC
+#endif /* __TBB_ALLOCATOR_CONSTRUCT_VARIADIC */
     void destroy( pointer p ) {p->~value_type();}
 };
 
 #if _MSC_VER && !defined(__INTEL_COMPILER)
     #pragma warning (pop)
-#endif // warning 4100 is back
+#endif /* warning 4100 is back */
 
 //! Analogous to std::allocator<void>, as defined in ISO C++ Standard, Section 20.4.1
 /** @ingroup memory_allocation */
@@ -291,6 +319,48 @@ inline bool operator==( const scalable_allocator<T>&, const scalable_allocator<U
 
 template<typename T, typename U>
 inline bool operator!=( const scalable_allocator<T>&, const scalable_allocator<U>& ) {return false;}
+
+#if __TBB_CPP17_MEMORY_RESOURCE_PRESENT
+
+namespace internal {
+
+//! C++17 memory resource implementation for scalable allocator
+//! ISO C++ Section 23.12.2
+class scalable_resource_impl : public std::pmr::memory_resource {
+private:
+    void* do_allocate(size_t bytes, size_t alignment) override {
+        void* ptr = scalable_aligned_malloc( bytes, alignment );
+        if (!ptr) {
+            throw_exception(std::bad_alloc());
+        }
+        return ptr;
+    }
+
+    void do_deallocate(void* ptr, size_t /*bytes*/, size_t /*alignment*/) override {
+        scalable_free(ptr);
+    }
+
+    //! Memory allocated by one instance of scalable_resource_impl could be deallocated by any
+    //! other instance of this class
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+        return this == &other ||
+#if __TBB_USE_OPTIONAL_RTTI
+            dynamic_cast<const scalable_resource_impl*>(&other) != NULL;
+#else
+            false;
+#endif
+    }
+};
+
+} // namespace internal
+
+//! Global scalable allocator memory resource provider
+inline std::pmr::memory_resource* scalable_memory_resource() noexcept {
+    static tbb::internal::scalable_resource_impl scalable_res;
+    return &scalable_res;
+}
+
+#endif /* __TBB_CPP17_MEMORY_RESOURCE_PRESENT */
 
 } // namespace tbb
 
@@ -314,6 +384,6 @@ inline bool operator!=( const scalable_allocator<T>&, const scalable_allocator<U
 
 #if !defined(__cplusplus) && __ICC==1100
     #pragma warning (pop)
-#endif // ICC 11.0 warning 991 is back
+#endif /* ICC 11.0 warning 991 is back */
 
 #endif /* __TBB_scalable_allocator_H */

@@ -1,32 +1,40 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 /* Some tests in this source file are based on PPL tests provided by Microsoft. */
 #include "tbb/parallel_for.h"
 #include "tbb/tick_count.h"
 #include "harness.h"
+#include "test_container_move_support.h"
 // Test that unordered containers do not require keys have default constructors.
 #define __HARNESS_CHECKTYPE_DEFAULT_CTOR 0
 #include "harness_checktype.h"
 #undef  __HARNESS_CHECKTYPE_DEFAULT_CTOR
 #include "harness_allocator.h"
+
+template<typename T>
+struct degenerate_hash {
+    size_t operator()(const T& /*a*/) const {
+        return 1;
+    }
+};
 
 // TestInitListSupportWithoutAssign with an empty initializer list causes internal error in Intel Compiler.
 #define __TBB_ICC_EMPTY_INIT_LIST_TESTS_BROKEN (__INTEL_COMPILER && __INTEL_COMPILER <= 1500)
@@ -49,12 +57,21 @@ inline void CheckAllocator(MyTable &table, size_t expected_allocs, size_t expect
     }
 }
 
+template<typename T>
+struct strip_const { typedef T type; };
+
+template<typename T>
+struct strip_const<const T> { typedef T type; };
+
 // value generator for cumap
 template <typename K, typename V = std::pair<const K, K> >
 struct ValueFactory {
+    typedef typename strip_const<K>::type Kstrip;
     static V make(const K &value) { return V(value, value); }
-    static K key(const V &value) { return value.first; }
-    static K get(const V& value) { return value.second; }
+    static Kstrip key(const V &value) { return value.first; }
+    static Kstrip get(const V &value) { return (Kstrip)value.second; }
+    template< typename U >
+    static U convert(const V &value) { return U(value.second); }
 };
 
 // generator for cuset
@@ -63,10 +80,17 @@ struct ValueFactory<T, T> {
     static T make(const T &value) { return value; }
     static T key(const T &value) { return value; }
     static T get(const T &value) { return value; }
+    template< typename U >
+    static U convert(const T &value) { return U(value); }
 };
 
 template <typename T>
-struct Value : ValueFactory<typename T::key_type, typename T::value_type> {};
+struct Value : ValueFactory<typename T::key_type, typename T::value_type> {
+    template<typename U>
+    static bool compare( const typename T::iterator& it, U val ) {
+        return (Value::template convert<U>(*it) == val);
+    }
+};
 
 #if _MSC_VER
 #pragma warning(disable: 4189) // warning 4189 -- local variable is initialized but not referenced
@@ -74,15 +98,15 @@ struct Value : ValueFactory<typename T::key_type, typename T::value_type> {};
 #endif
 
 template<typename ContainerType, typename Iterator, typename RangeType>
-std::pair<int,int> CheckRecursiveRange(RangeType range) {
-    std::pair<int,int> sum(0, 0); // count, sum
+std::pair<intptr_t,intptr_t> CheckRecursiveRange(RangeType range) {
+    std::pair<intptr_t,intptr_t> sum(0, 0); // count, sum
     for( Iterator i = range.begin(), e = range.end(); i != e; ++i ) {
         ++sum.first; sum.second += Value<ContainerType>::get(*i);
     }
     if( range.is_divisible() ) {
         RangeType range2( range, tbb::split() );
-        std::pair<int,int> sum1 = CheckRecursiveRange<ContainerType,Iterator, RangeType>( range );
-        std::pair<int,int> sum2 = CheckRecursiveRange<ContainerType,Iterator, RangeType>( range2 );
+        std::pair<intptr_t,intptr_t> sum1 = CheckRecursiveRange<ContainerType,Iterator, RangeType>( range );
+        std::pair<intptr_t,intptr_t> sum2 = CheckRecursiveRange<ContainerType,Iterator, RangeType>( range2 );
         sum1.first += sum2.first; sum1.second += sum2.second;
         ASSERT( sum == sum1, "Mismatched ranges after division");
     }
@@ -100,7 +124,7 @@ bool equal_containers( container_type const& lhs, container_type const& rhs ) {
     if ( lhs.size() != rhs.size() ) {
         return false;
     }
-    return std::equal( lhs.begin(), lhs.end(), lhs.begin(), Harness::IsEqual() );
+    return std::equal( lhs.begin(), lhs.end(), rhs.begin(), Harness::IsEqual() );
 }
 
 #include "test_initializer_list.h"
@@ -122,8 +146,91 @@ void TestInitList( std::initializer_list<typename Table::value_type> il ) {
 }
 #endif //if __TBB_INITIALIZER_LISTS_PRESENT
 
-template<typename T>
-void test_basic(const char * str)
+template<Harness::StateTrackableBase::StateValue desired_state, typename T>
+void check_value_state(/* typename do_check_element_state =*/ tbb::internal::true_type, T const& t, const char* filename, int line )
+{
+    ASSERT_CUSTOM(is_state_f<desired_state>()(t), "", filename, line);
+}
+
+template<Harness::StateTrackableBase::StateValue desired_state, typename T>
+void check_value_state(/* typename do_check_element_state =*/ tbb::internal::false_type, T const&, const char* , int ) {/*do nothing*/}
+#define ASSERT_VALUE_STATE(do_check_element_state,state,value) check_value_state<state>(do_check_element_state,value,__FILE__,__LINE__)
+
+#if __TBB_CPP11_RVALUE_REF_PRESENT
+template<typename T, typename do_check_element_state, typename V>
+void test_rvalue_insert(V v1, V v2)
+{
+    typedef T container_t;
+
+    container_t cont;
+
+    std::pair<typename container_t::iterator, bool> ins = cont.insert(Value<container_t>::make(v1));
+    ASSERT(ins.second == true && Value<container_t>::get(*(ins.first)) == v1, "Element 1 has not been inserted properly");
+    ASSERT_VALUE_STATE(do_check_element_state(),Harness::StateTrackableBase::MoveInitialized,*ins.first);
+
+    typename container_t::iterator it2 = cont.insert(ins.first, Value<container_t>::make(v2));
+    ASSERT(Value<container_t>::get(*(it2)) == v2, "Element 2 has not been inserted properly");
+    ASSERT_VALUE_STATE(do_check_element_state(),Harness::StateTrackableBase::MoveInitialized,*it2);
+
+}
+#if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+// The test does not use variadic templates, but emplace() does.
+
+namespace emplace_helpers {
+template<typename container_t, typename arg_t, typename value_t>
+std::pair<typename container_t::iterator, bool> call_emplace_impl(container_t& c, arg_t&& k, value_t *){
+    // this is a set
+    return c.emplace(std::forward<arg_t>(k));
+}
+
+template<typename container_t, typename arg_t, typename first_t, typename second_t>
+std::pair<typename container_t::iterator, bool> call_emplace_impl(container_t& c, arg_t&& k, std::pair<first_t, second_t> *){
+    // this is a map
+    return c.emplace(k, std::forward<arg_t>(k));
+}
+
+template<typename container_t, typename arg_t>
+std::pair<typename container_t::iterator, bool> call_emplace(container_t& c, arg_t&& k){
+    typename container_t::value_type * selector = NULL;
+    return call_emplace_impl(c, std::forward<arg_t>(k), selector);
+}
+
+template<typename container_t, typename arg_t, typename value_t>
+typename container_t::iterator call_emplace_hint_impl(container_t& c, typename container_t::const_iterator hint, arg_t&& k, value_t *){
+    // this is a set
+    return c.emplace_hint(hint, std::forward<arg_t>(k));
+}
+
+template<typename container_t, typename arg_t, typename first_t, typename second_t>
+typename container_t::iterator call_emplace_hint_impl(container_t& c, typename container_t::const_iterator hint, arg_t&& k, std::pair<first_t, second_t> *){
+    // this is a map
+    return c.emplace_hint(hint, k, std::forward<arg_t>(k));
+}
+
+template<typename container_t, typename arg_t>
+typename container_t::iterator call_emplace_hint(container_t& c, typename container_t::const_iterator hint, arg_t&& k){
+    typename container_t::value_type * selector = NULL;
+    return call_emplace_hint_impl(c, hint, std::forward<arg_t>(k), selector);
+}
+}
+template<typename T, typename do_check_element_state, typename V>
+void test_emplace_insert(V v1, V v2){
+    typedef T container_t;
+    container_t cont;
+
+    std::pair<typename container_t::iterator, bool> ins = emplace_helpers::call_emplace(cont, v1);
+    ASSERT(ins.second == true && Value<container_t>::compare(ins.first, v1), "Element 1 has not been inserted properly");
+    ASSERT_VALUE_STATE(do_check_element_state(),Harness::StateTrackableBase::DirectInitialized,*ins.first);
+
+    typename container_t::iterator it2 = emplace_helpers::call_emplace_hint(cont, ins.first, v2);
+    ASSERT(Value<container_t>::compare(it2, v2), "Element 2 has not been inserted properly");
+    ASSERT_VALUE_STATE(do_check_element_state(),Harness::StateTrackableBase::DirectInitialized,*it2);
+}
+#endif //__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+#endif // __TBB_CPP11_RVALUE_REF_PRESENT
+
+template<typename T, typename do_check_element_state>
+void test_basic(const char * str, do_check_element_state)
 {
     T cont;
     const T &ccont(cont);
@@ -146,6 +253,13 @@ void test_basic(const char * str)
     //std::pair<iterator, bool> insert(const value_type& obj);
     std::pair<typename T::iterator, bool> ins = cont.insert(Value<T>::make(1));
     ASSERT(ins.second == true && Value<T>::get(*(ins.first)) == 1, "Element 1 has not been inserted properly");
+
+#if __TBB_CPP11_RVALUE_REF_PRESENT
+    test_rvalue_insert<T,do_check_element_state>(1,2);
+#if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+    test_emplace_insert<T,do_check_element_state>(1,2);
+#endif // __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+#endif // __TBB_CPP11_RVALUE_REF_PRESENT
 
     // bool empty() const;
     ASSERT(!ccont.empty(), "Concurrent container is empty after adding an element");
@@ -322,24 +436,16 @@ void test_basic(const char * str)
         ASSERT(buck < 16, "Wrong bucket mapping");
     }
 
+    typename T::size_type bucketSizeSum = 0;
+    typename T::size_type iteratorSizeSum = 0;
+
     for (unsigned int i = 0; i < 16; i++)
     {
-        // size_type unsafe_bucket_size(size_type n);
-        ASSERT(cont.unsafe_bucket_size(i) == 16, "Wrong number of elements are in a bucket");
-
-        // local_iterator unsafe_begin(size_type n);
-        // const_local_iterator unsafe_begin(size_type n) const;
-        // local_iterator unsafe_end(size_type n);
-        // const_local_iterator unsafe_end(size_type n) const;
-        // const_local_iterator unsafe_cbegin(size_type n) const;
-        // const_local_iterator unsafe_cend(size_type n) const;
-        unsigned int count = 0;
-        for (typename T::iterator bit = cont.unsafe_begin(i); bit != cont.unsafe_end(i); bit++)
-        {
-            count++;
-        }
-        ASSERT(count == 16, "Bucket iterators are invalid");
+        bucketSizeSum += cont.unsafe_bucket_size(i);
+        for (typename T::iterator bit = cont.unsafe_begin(i); bit != cont.unsafe_end(i); bit++) iteratorSizeSum++;
     }
+    ASSERT(bucketSizeSum == 256, "sum of bucket counts incorrect");
+    ASSERT(iteratorSizeSum == 256, "sum of iterator counts incorrect");
 
     // void swap(T&);
     cont.swap(newcont);
@@ -360,6 +466,11 @@ void test_basic(const char * str)
 #endif
 
     SpecialTests<T>::Test(str);
+}
+
+template<typename T>
+void test_basic(const char * str){
+    test_basic<T>(str, tbb::internal::false_type());
 }
 
 void test_machine() {
@@ -438,14 +549,14 @@ template<typename ContainerType, typename RangeType>
 struct ParallelTraverseBody: NoAssign {
     const int n;
     AtomicByte* const array;
-    ParallelTraverseBody( AtomicByte an_array[], int a_n ) : 
+    ParallelTraverseBody( AtomicByte an_array[], int a_n ) :
         n(a_n), array(an_array)
     {}
     void operator()( const RangeType& range ) const {
         for( typename RangeType::iterator i = range.begin(); i!=range.end(); ++i ) {
-            int k = Value<ContainerType>::key(*i);
+            int k = static_cast<int>(Value<ContainerType>::key(*i));
             ASSERT( k == Value<ContainerType>::get(*i), NULL );
-            ASSERT( 0<=k && k<n, NULL ); 
+            ASSERT( 0<=k && k<n, NULL );
             array[k]++;
         }
     }
@@ -492,16 +603,6 @@ public:
 };
 
 template<typename T>
-class AssignBody: NoAssign {
-    T &table;
-public:
-    AssignBody(T &t) : NoAssign(), table(t) {}
-    void operator()(int i) const {
-        table[i] = i;
-    }
-};
-
-template<typename T>
 void test_concurrent(const char *tablename, bool asymptotic = false) {
 #if TBB_USE_ASSERT
     int items = 2000;
@@ -534,16 +635,16 @@ void test_concurrent(const char *tablename, bool asymptotic = false) {
 
     if(!asymptotic) {
         AtomicByte* array = new AtomicByte[items];
-        memset( array, 0, items*sizeof(AtomicByte) );
+        memset( static_cast<void*>(array), 0, items*sizeof(AtomicByte) );
 
         typename T::range_type r = table.range();
-        std::pair<int,int> p = CheckRecursiveRange<T,typename T::iterator>(r);
+        std::pair<intptr_t,intptr_t> p = CheckRecursiveRange<T,typename T::iterator>(r);
         ASSERT((nItemsInserted == p.first), NULL);
         tbb::parallel_for( r, ParallelTraverseBody<T, typename T::const_range_type>( array, items ));
         CheckRange( array, items, T::allow_multimapping, (nThreads - 1)/2 );
 
         const T &const_table = table;
-        memset( array, 0, items*sizeof(AtomicByte) );
+        memset( static_cast<void*>(array), 0, items*sizeof(AtomicByte) );
         typename T::const_range_type cr = const_table.range();
         ASSERT((nItemsInserted == CheckRecursiveRange<T,typename T::const_iterator>(cr).first), NULL);
         tbb::parallel_for( cr, ParallelTraverseBody<T, typename T::const_range_type>( array, items ));
@@ -556,10 +657,6 @@ void test_concurrent(const char *tablename, bool asymptotic = false) {
     table.clear();
     CheckAllocatorA(table, items+1, items); // one dummy is always allocated
 
-    for(int i=0; i<1000; ++i) {
-        tbb::parallel_for( 0, 8, AssignBody<T>( table ) );
-        table.clear();
-    }
 }
 
 // The helper to call a function only when a doCall == true.
@@ -598,6 +695,17 @@ public:
 };
 
 #if __TBB_CPP11_SMART_POINTERS_PRESENT
+// For the sake of simplified testing, make unique_ptr implicitly convertible to/from the pointer
+namespace test {
+    template<typename T>
+    class unique_ptr : public std::unique_ptr<T> {
+    public:
+        typedef typename std::unique_ptr<T>::pointer pointer;
+        unique_ptr( pointer p ) : std::unique_ptr<T>(p) {}
+        operator pointer() const { return this->get(); }
+    };
+}
+
 namespace tbb {
     template<> class tbb_hash< std::shared_ptr<int> > {
     public:
@@ -614,6 +722,14 @@ namespace tbb {
     template<> class tbb_hash< const std::weak_ptr<int> > {
     public:
         size_t operator()( const std::weak_ptr<int>& key ) const { return tbb_hasher( *key.lock( ) ); }
+    };
+    template<> class tbb_hash< test::unique_ptr<int> > {
+    public:
+        size_t operator()( const test::unique_ptr<int>& key ) const { return tbb_hasher( *key ); }
+    };
+    template<> class tbb_hash< const test::unique_ptr<int> > {
+    public:
+        size_t operator()( const test::unique_ptr<int>& key ) const { return tbb_hasher( *key ); }
     };
 }
 #endif /* __TBB_CPP11_SMART_POINTERS_PRESENT */
@@ -693,13 +809,14 @@ struct unordered_move_traits_base {
 };
 
 template<typename container_traits>
-void test_rvalue_ref_support(const char* /*container_name*/){
+void test_rvalue_ref_support(const char* container_name){
     TestMoveConstructor<container_traits>();
     TestMoveAssignOperator<container_traits>();
 #if TBB_USE_EXCEPTIONS
     TestExceptionSafetyGuaranteesMoveConstructorWithUnEqualAllocatorMemoryFailure<container_traits>();
     TestExceptionSafetyGuaranteesMoveConstructorWithUnEqualAllocatorExceptionInElementCtor<container_traits>();
 #endif //TBB_USE_EXCEPTIONS
+    REMARK("passed -- %s move support tests\n", container_name);
 }
 #endif //__TBB_CPP11_RVALUE_REF_PRESENT
 
@@ -792,12 +909,28 @@ void TypeTester( const std::list<typename Table::value_type> &lst ) {
     Table c1;
     c1.insert( lst.begin(), lst.end() );
     Examine<defCtorPresent>( c1, lst );
+
+    typename Table::size_type initial_bucket_number = 8;
+    typename Table::allocator_type allocator;
+    typename Table::hasher hasher;
 #if __TBB_INITIALIZER_LISTS_PRESENT && !__TBB_CPP11_INIT_LIST_TEMP_OBJS_LIFETIME_BROKEN
     // Constructor from an initializer_list.
     typename std::list<typename Table::value_type>::const_iterator it = lst.begin();
     Table c2( { *it++, *it++, *it++ } );
     c2.insert( it, lst.end( ) );
     Examine<defCtorPresent>( c2, lst );
+
+    it = lst.begin();
+    // Constructor from an initializer_list, default hasher and key equality and non-default allocator
+    Table c2_alloc( { *it++, *it++, *it++ }, initial_bucket_number, allocator);
+    c2_alloc.insert( it, lst.end() );
+    Examine<defCtorPresent>( c2_alloc, lst );
+
+    it = lst.begin();
+    // Constructor from an initializer_list, default key equality and non-default hasher and allocator
+    Table c2_hash_alloc( { *it++, *it++, *it++ }, initial_bucket_number, hasher, allocator );
+    c2_hash_alloc.insert( it, lst.end() );
+    Examine<defCtorPresent>( c2_hash_alloc, lst );
 #endif
     // Copying constructor.
     Table c3( c1 );
@@ -813,12 +946,32 @@ void TypeTester( const std::list<typename Table::value_type> &lst ) {
     Table c6( lst.size() );
     c6.insert( lst.begin(), lst.end() );
     Examine<defCtorPresent>( c6, lst );
+
+    // Construction empty table with n preallocated buckets, default hasher and key equality and non-default allocator
+    Table c6_alloc( lst.size(), allocator );
+    c6_alloc.insert( lst.begin(), lst.end() );
+    Examine<defCtorPresent>( c6_alloc, lst );
+
+    // Construction empty table with n preallocated buckets, default key equality and non-default hasher and allocator
+    Table c6_hash_alloc( lst.size(), hasher, allocator );
+    c6_hash_alloc.insert( lst.begin(), lst.end() );
+    Examine<defCtorPresent>( c6_hash_alloc, lst );
+
     TableDebugAlloc c7( lst.size( ) );
     c7.insert( lst.begin(), lst.end() );
     Examine<defCtorPresent>( c7, lst );
     // Construction with a copying iteration range and a given allocator instance.
     Table c8( c1.begin(), c1.end() );
     Examine<defCtorPresent>( c8, lst );
+
+    // Construction with a copying iteration range, default hasher and key equality and non-default allocator
+    Table c8_alloc( c1.begin(), c1.end(), initial_bucket_number, allocator );
+    Examine<defCtorPresent>( c8_alloc, lst );
+
+    // Construction with a copying iteration range, default key equality and non-default hasher and allocator
+    Table c8_hash_alloc( c1.begin(), c1.end(), initial_bucket_number, hasher, allocator );
+    Examine<defCtorPresent>( c8_hash_alloc, lst);
+
     typename TableDebugAlloc::allocator_type a;
     TableDebugAlloc c9( a );
     c9.insert( c7.begin(), c7.end() );
@@ -835,3 +988,405 @@ namespace test_select_size_t_constant{
     __TBB_STATIC_ASSERT((tbb::internal::select_size_t_constant<0x12345678U,0x091A2B3C091A2B3CULL>::value % ~0U == 0x12345678U),
             "select_size_t_constant have chosen the wrong constant");
 }
+
+#if __TBB_UNORDERED_NODE_HANDLE_PRESENT
+namespace node_handling{
+    template<typename Handle>
+    bool compare_handle_getters(
+        const Handle& node, const std::pair<typename Handle::key_type, typename Handle::mapped_type>& expected
+    ) {
+        return node.key() == expected.first && node.mapped() == expected.second;
+    }
+
+    template<typename Handle>
+    bool compare_handle_getters( const Handle& node, const typename Handle::value_type& value) {
+        return node.value() == value;
+    }
+
+    template<typename Handle>
+    void set_node_handle_value(
+        Handle& node, const std::pair<typename Handle::key_type, typename Handle::mapped_type>& value
+    ) {
+        node.key() = value.first;
+        node.mapped() = value.second;
+    }
+
+    template<typename Handle>
+    void set_node_handle_value( Handle& node, const typename Handle::value_type& value) {
+        node.value() = value;
+    }
+
+    template <typename node_type>
+    void TestTraits() {
+        ASSERT( !std::is_copy_constructible<node_type>::value,
+                "Node handle: Handle is copy constructable" );
+        ASSERT( !std::is_copy_assignable<node_type>::value,
+                "Node handle: Handle is copy assignable" );
+        ASSERT( std::is_move_constructible<node_type>::value,
+                "Node handle: Handle is not move constructable" );
+        ASSERT( std::is_move_assignable<node_type>::value,
+                "Node handle: Handle is not move constructable" );
+        ASSERT( std::is_default_constructible<node_type>::value,
+                "Node handle:  Handle is not default constructable" );
+        ASSERT( std::is_destructible<node_type>::value,
+                "Node handle: Handle is not destructible" );
+    }
+
+    template <typename Table>
+    void TestHandle( Table test_table ) {
+        ASSERT( test_table.size()>1, "Node handle: Container must contains 2 or more elements" );
+        // Initialization
+        using node_type = typename Table::node_type;
+
+        TestTraits<node_type>();
+
+        // Default Ctor and empty function
+        node_type nh;
+        ASSERT( nh.empty(), "Node handle: Node is not empty after initialization" );
+
+        // Move Assign
+        // key/mapped/value function
+        auto expected_value = *test_table.begin();
+
+        nh = test_table.unsafe_extract(test_table.begin());
+        ASSERT( !nh.empty(), "Node handle: Node handle is empty after valid move assigning" );
+        ASSERT( compare_handle_getters(nh,expected_value),
+                "Node handle: After valid move assigning "
+                "node handle does not contains expected value");
+
+        // Move Ctor
+        // key/mapped/value function
+        node_type nh2(std::move(nh));
+        ASSERT( nh.empty(), "Node handle: After valid move construction node handle is empty" );
+        ASSERT( !nh2.empty(), "Node handle: After valid move construction "
+                              "argument hode handle was not moved" );
+        ASSERT( compare_handle_getters(nh2,expected_value),
+                "Node handle: After valid move construction "
+                "node handle does not contains expected value" );
+
+        // Bool conversion
+        ASSERT( nh2, "Node hanlde: Wrong not handle bool conversion" );
+
+        // Change key/mapped/value of node handle
+        auto expected_value2 = *test_table.begin();
+        set_node_handle_value(nh2, expected_value2);
+        ASSERT( compare_handle_getters(nh2, expected_value2),
+                "Node handle: Wrong node handle key/mapped/value changing behavior" );
+
+        // Member/non member swap check
+        node_type empty_node;
+        // We extract this element for nh2 and nh3 difference
+        test_table.unsafe_extract(test_table.begin());
+        auto expected_value3 =  *test_table.begin();
+        node_type nh3(test_table.unsafe_extract(test_table.begin()));
+
+        // Both of node handles are not empty
+        nh3.swap(nh2);
+        ASSERT( compare_handle_getters(nh3, expected_value2),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( compare_handle_getters(nh2, expected_value3),
+                "Node handle: Wrong node handle swap behavior" );
+
+        std::swap(nh2,nh3);
+        ASSERT( compare_handle_getters(nh3, expected_value3),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( compare_handle_getters(nh2, expected_value2),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( !nh2.empty(), "Node handle: Wrong node handle swap behavior" );
+        ASSERT( !nh3.empty(), "Node handle: Wrong node handle swap behavior" );
+
+        // One of nodes is empty
+        nh3.swap(empty_node);
+        ASSERT( compare_handle_getters(std::move(empty_node), expected_value3),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( nh3.empty(), "Node handle: Wrong node handle swap behavior" );
+
+        std::swap(empty_node, nh3);
+        ASSERT( compare_handle_getters(std::move(nh3), expected_value3),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( empty_node.empty(), "Node handle: Wrong node handle swap behavior" );
+
+        empty_node.swap(nh3);
+        ASSERT( compare_handle_getters(std::move(empty_node), expected_value3),
+                "Node handle: Wrong node handle swap behavior" );
+        ASSERT( nh3.empty(), "Node handle: Wrong node handle swap behavior" );
+    }
+
+    template <typename Table>
+    typename Table::node_type GenerateNodeHandle(const typename Table::value_type& value) {
+        Table temp_table;
+        temp_table.insert(value);
+        return temp_table.unsafe_extract(temp_table.cbegin());
+    }
+
+    // overload for multitable or insertion with hint iterator
+    template <typename Table>
+    void InsertAssertion( const Table& table,
+                          const typename Table::iterator& result,
+                          bool,
+                          const typename Table::value_type* node_value = nullptr ) {
+        if (node_value==nullptr) {
+            ASSERT( result==table.end(), "Insert: Result iterator does not "
+                                         "contains end pointer after empty node insertion" );
+        } else {
+            if (!Table::allow_multimapping) {
+                ASSERT( result==table.find(Value<Table>::key( *node_value )) &&
+                        result != table.end(),
+                        "Insert: After node insertion result iterator"
+                        " doesn't contains address to equal element in table" );
+            } else {
+                ASSERT( *result==*node_value, "Insert: Result iterator contains"
+                                              "wrong content after successful insertion" );
+
+                for (auto it = table.begin(); it != table.end(); ++it) {
+                    if (it == result) return;
+                }
+                ASSERT( false, "Insert: After successful insertion result "
+                               "iterator contains address that is not in the table" );
+            }
+        }
+    }
+
+    // Not multitable overload
+    template <typename Table>
+    void InsertAssertion( const Table& table,
+                          const std::pair<typename Table::iterator, bool>& result,
+                          bool is_existing_key,
+                          const typename Table::value_type* node_value = nullptr ) {
+        // Empty node insertion
+        if (node_value == nullptr) {
+            ASSERT( result.first == table.end(),
+                    "Insert: Returned iterator does not contains "
+                    "pointer end after empty node insertion" );
+            ASSERT( !result.second,
+                    "Insert: Returned bool return true after empty node insertion" );
+        } else {
+            ASSERT( result.first == table.find(Value<Table>::key( *node_value )),
+                    "Insert: Returned iterator not contains iterator "
+                    "to equal node in table after node insertion" );
+            ASSERT( result.second == (!is_existing_key || Table::allow_multimapping),
+                    "Insert: Returned bool wrong value after node insertion" );
+        }
+    }
+
+#if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+    // Internal func for testing
+    // Can't delete ref from "Table" argument because hint must point to element of table
+    namespace {
+        template <typename Table, typename... Hint>
+        void TestInsertOverloads( Table& table_to_insert,
+                                  const typename Table::value_type &value, const Hint&... hint ) {
+            // Insert empty element
+            typename Table::node_type nh;
+
+            auto table_size = table_to_insert.size();
+            auto result = table_to_insert.insert(hint..., std::move(nh));
+            InsertAssertion(table_to_insert, result, /*is_existing_key*/ false);
+            ASSERT( table_to_insert.size() == table_size,
+                    "Insert: After empty node insertion table size changed" );
+
+            // Standart insertion
+            nh = GenerateNodeHandle<Table>(value);
+
+            result = table_to_insert.insert(hint..., std::move(nh));
+            ASSERT( nh.empty(), "Insert: Not empty handle after successful insertion" );
+            InsertAssertion(table_to_insert, result, /*is_existing_key*/ false, &value);
+
+            // Insert existing node
+            nh = GenerateNodeHandle<Table>(value);
+
+            result = table_to_insert.insert(hint..., std::move(nh));
+
+            InsertAssertion(table_to_insert, result, /*is_existing_key*/ true, &value);
+
+            if (Table::allow_multimapping){
+                ASSERT( nh.empty(), "Insert: Failed insertion to multitable" );
+            } else {
+                ASSERT( !nh.empty() , "Insert: Empty handle after failed insertion" );
+                ASSERT( compare_handle_getters( std::move(nh), value ),
+                        "Insert: Existing data does not equal to the one being inserted" );
+            }
+        }
+    }
+
+    template <typename Table>
+    void TestInsert( Table table, const typename Table::value_type &value) {
+        ASSERT( !table.empty(), "Insert: Map should contains 1 or more elements" );
+        Table table_backup(table);
+
+        TestInsertOverloads(table, value);
+        TestInsertOverloads(table_backup, value, table.begin());
+    }
+#endif /*__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT*/
+
+    template <typename Table>
+    void TestExtract( Table table_for_extract, typename Table::key_type new_key ) {
+        ASSERT( table_for_extract.size()>1, "Extract: Container must contains 2 or more element" );
+        ASSERT( table_for_extract.find(new_key)==table_for_extract.end(),
+                "Extract: Table must not contains new element!");
+
+        // Extract new element
+        auto nh = table_for_extract.unsafe_extract(new_key);
+        ASSERT( nh.empty(), "Extract: Node handle is not empty after wrong key extraction" );
+
+        // Valid key extraction
+        auto expected_value = *table_for_extract.cbegin();
+        auto key = Value<Table>::key( expected_value );
+        auto count = table_for_extract.count(key);
+
+        nh = table_for_extract.unsafe_extract(key);
+        ASSERT( !nh.empty(),
+                "Extract: After successful extraction by key node handle is empty" );
+        ASSERT( compare_handle_getters(std::move(nh), expected_value),
+                "Extract: After successful extraction by key node handle contains wrong value" );
+        ASSERT( table_for_extract.count(key) == count - 1,
+                "Extract: After successful node extraction by key, table still contains this key" );
+
+        // Valid iterator overload
+        auto expected_value2 = *table_for_extract.cbegin();
+        auto key2 = Value<Table>::key( expected_value2 );
+        auto count2 = table_for_extract.count(key2);
+
+        nh = table_for_extract.unsafe_extract(table_for_extract.cbegin());
+        ASSERT( !nh.empty(),
+                "Extract: After successful extraction by iterator node handle is empty" );
+        ASSERT( compare_handle_getters(std::move(nh), expected_value2),
+                "Extract: After successful extraction by iterator node handle contains wrong value" );
+        ASSERT( table_for_extract.count(key2) == count2 - 1,
+                "Extract: After successful extraction table also contains this element" );
+    }
+
+    // All test exclude merge
+    template <typename Table>
+    void NodeHandlingTests ( const Table& table,
+                             const typename Table::value_type& new_value) {
+        TestHandle(table);
+#if __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT
+        TestInsert(table, new_value);
+#endif /*__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT*/
+        TestExtract(table,  Value<Table>::key( new_value ));
+    }
+
+    template <typename TableType1, typename TableType2>
+    void TestMerge( TableType1 table1, TableType2&& table2 ) {
+        using Table2PureType = typename std::decay<TableType2>::type;
+        // Initialization
+        TableType1 table1_backup = table1;
+        // For copying lvalue
+        Table2PureType table2_backup = table2;
+
+        table1.merge(std::forward<TableType2>(table2));
+        for (auto it: table2) {
+            ASSERT( table1.find( Value<Table2PureType>::key( it ) ) != table1.end(),
+                    "Merge: Some key(s) was not merged" );
+        }
+
+        // After the following step table1 will contains only merged elements from table2
+        for (auto it: table1_backup) {
+            table1.unsafe_extract(Value<TableType1>::key( it ));
+        }
+        // After the following step table2_backup will contains only merged elements from table2
+         for (auto it: table2) {
+            table2_backup.unsafe_extract(Value<Table2PureType>::key( it ));
+        }
+
+        ASSERT ( table1.size() == table2_backup.size(), "Merge: Size of tables is not equal" );
+        for (auto it: table2_backup) {
+            ASSERT( table1.find( Value<Table2PureType>::key( it ) ) != table1.end(),
+                    "Merge: Wrong merge behavior" );
+        }
+    }
+
+    // Testing of rvalue and lvalue overloads
+    template <typename TableType1, typename TableType2>
+    void TestMergeOverloads( const TableType1& table1, TableType2 table2 ) {
+        TableType2 table_backup(table2);
+        TestMerge(table1, table2);
+        TestMerge(table1, std::move(table_backup));
+    }
+
+    template <typename Table, typename MultiTable>
+    void TestMergeTransposition( Table table1, Table table2,
+                                 MultiTable multitable1, MultiTable multitable2 ) {
+        Table empty_map;
+        MultiTable empty_multimap;
+
+        // Map transpositions
+        node_handling::TestMergeOverloads(table1, table2);
+        node_handling::TestMergeOverloads(table1, empty_map);
+        node_handling::TestMergeOverloads(empty_map, table2);
+
+        // Multimap transpositions
+        node_handling::TestMergeOverloads(multitable1, multitable2);
+        node_handling::TestMergeOverloads(multitable1, empty_multimap);
+        node_handling::TestMergeOverloads(empty_multimap, multitable2);
+
+        // Map/Multimap transposition
+        node_handling::TestMergeOverloads(table1, multitable1);
+        node_handling::TestMergeOverloads(multitable2, table2);
+    }
+
+    template <typename Table>
+    void AssertionConcurrentMerge ( Table start_data, Table src_table, std::vector<Table> tables,
+                                    std::true_type) {
+        ASSERT( src_table.size() == start_data.size()*tables.size(),
+                "Merge: Incorrect merge for some elements" );
+
+        for(auto it: start_data) {
+            ASSERT( src_table.count( Value<Table>::key( it ) ) ==
+                    start_data.count( Value<Table>::key( it ) )*tables.size(),
+                                      "Merge: Incorrect merge for some element" );
+        }
+
+        for (size_t i = 0; i < tables.size(); i++) {
+            ASSERT( tables[i].empty(), "Merge: Some elements was not merged" );
+        }
+    }
+
+    template <typename Table>
+    void AssertionConcurrentMerge ( Table start_data, Table src_table, std::vector<Table> tables,
+                                    std::false_type) {
+        Table expected_result;
+        for (auto table: tables)
+            for (auto it: start_data) {
+                // If we cannot find some element in some table, then it has been moved
+                if (table.find( Value<Table>::key( it ) ) == table.end()){
+                    bool result = expected_result.insert( it ).second;
+                    ASSERT( result, "Merge: Some element was merged twice or was not "
+                                    "returned to his owner after unsuccessful merge");
+                }
+            }
+
+        ASSERT( expected_result.size() == src_table.size() && start_data.size() == src_table.size(),
+                "Merge: wrong size of result table");
+        for (auto it: expected_result) {
+            if ( src_table.find( Value<Table>::key( it ) ) != src_table.end() &&
+                 start_data.find( Value<Table>::key( it ) ) != start_data.end() ){
+                src_table.unsafe_extract(Value<Table>::key( it ));
+                start_data.unsafe_extract(Value<Table>::key( it ));
+            } else {
+                ASSERT( false, "Merge: Incorrect merge for some element" );
+            }
+        }
+
+        ASSERT( src_table.empty()&&start_data.empty(), "Merge: Some elements were not merged" );
+    }
+
+    template <typename Table>
+    void TestConcurrentMerge (const Table& table_data) {
+        for (auto num_threads = MinThread + 1; num_threads <= MaxThread; num_threads++){
+            std::vector<Table> tables;
+            Table src_table;
+
+            for (auto j = 0; j < num_threads; j++){
+                tables.push_back(table_data);
+            }
+
+            NativeParallelFor( num_threads, [&](size_t index){ src_table.merge(tables[index]); } );
+
+            AssertionConcurrentMerge( table_data, src_table, tables,
+                                      std::integral_constant<bool,Table::allow_multimapping>{});
+        }
+    }
+}
+#endif /*__TBB_UNORDERED_NODE_HANDLE_PRESENT*/

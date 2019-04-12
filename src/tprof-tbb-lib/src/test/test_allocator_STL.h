@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 // Tests for compatibility with the host's STL.
@@ -26,7 +26,7 @@ template<typename Container>
 void TestSequence(const typename Container::allocator_type &a) {
     Container c(a);
     for( int i=0; i<1000; ++i )
-        c.push_back(i*i);    
+        c.push_back(i*i);
     typename Container::const_iterator p = c.begin();
     for( int i=0; i<1000; ++i ) {
         ASSERT( *p==i*i, NULL );
@@ -40,7 +40,7 @@ template<typename Set>
 void TestSet(const typename Set::allocator_type &a) {
     Set s(typename Set::key_compare(), a);
     typedef typename Set::value_type value_type;
-    for( int i=0; i<100; ++i ) 
+    for( int i=0; i<100; ++i )
         s.insert(value_type(3*i));
     for( int i=0; i<300; ++i ) {
         ASSERT( s.erase(i)==size_t(i%3==0), NULL );
@@ -51,27 +51,17 @@ template<typename Map>
 void TestMap(const typename Map::allocator_type &a) {
     Map m(typename Map::key_compare(), a);
     typedef typename Map::value_type value_type;
-    for( int i=0; i<100; ++i ) 
+    for( int i=0; i<100; ++i )
         m.insert(value_type(i,i*i));
     for( int i=0; i<100; ++i )
         ASSERT( m.find(i)->second==i*i, NULL );
 }
-
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    // Suppress "C++ exception handler used, but unwind semantics are not enabled" warning in STL headers
-    #pragma warning (push)
-    #pragma warning (disable: 4530)
-#endif
 
 #include <deque>
 #include <list>
 #include <map>
 #include <set>
 #include <vector>
-
-#if !TBB_USE_EXCEPTIONS && _MSC_VER
-    #pragma warning (pop)
-#endif
 
 #if __TBB_CPP11_RVALUE_REF_PRESENT
 struct MoveOperationTracker {
@@ -104,12 +94,23 @@ struct MoveOperationTracker {
 
 template<typename Allocator>
 void TestAllocatorWithSTL(const Allocator &a = Allocator() ) {
+
+// Allocator type convertion section
+#if __TBB_ALLOCATOR_TRAITS_PRESENT
+    typedef typename std::allocator_traits<Allocator>::template rebind_alloc<int> Ai;
+    typedef typename std::allocator_traits<Allocator>::template rebind_alloc<std::pair<const int, int> > Acii;
+#if _MSC_VER
+    typedef typename std::allocator_traits<Allocator>::template rebind_alloc<const int> Aci;
+    typedef typename std::allocator_traits<Allocator>::template rebind_alloc<std::pair<int, int> > Aii;
+#endif // _MSC_VER
+#else
     typedef typename Allocator::template rebind<int>::other Ai;
     typedef typename Allocator::template rebind<std::pair<const int, int> >::other Acii;
 #if _MSC_VER
     typedef typename Allocator::template rebind<const int>::other Aci;
     typedef typename Allocator::template rebind<std::pair<int, int> >::other Aii;
-#endif
+#endif // _MSC_VER
+#endif // __TBB_ALLOCATOR_TRAITS_PRESENT
 
     // Sequenced containers
     TestSequence<std::deque <int,Ai> >(a);
@@ -117,11 +118,15 @@ void TestAllocatorWithSTL(const Allocator &a = Allocator() ) {
     TestSequence<std::vector<int,Ai> >(a);
 
 #if __TBB_CPP11_RVALUE_REF_PRESENT
+#if __TBB_ALLOCATOR_TRAITS_PRESENT
+    typedef typename std::allocator_traits<Allocator>::template rebind_alloc<MoveOperationTracker> Amot;
+#else
     typedef typename Allocator::template rebind<MoveOperationTracker>::other Amot;
+#endif // __TBB_ALLOCATOR_TRAITS_PRESENT
     TestSequence<std::deque <MoveOperationTracker, Amot> >(a);
     TestSequence<std::list  <MoveOperationTracker, Amot> >(a);
     TestSequence<std::vector<MoveOperationTracker, Amot> >(a);
-#endif
+#endif // __TBB_CPP11_RVALUE_REF_PRESENT
 
     // Associative containers
     TestSet<std::set     <int, std::less<int>, Ai> >(a);
@@ -129,7 +134,7 @@ void TestAllocatorWithSTL(const Allocator &a = Allocator() ) {
     TestMap<std::map     <int, int, std::less<int>, Acii> >(a);
     TestMap<std::multimap<int, int, std::less<int>, Acii> >(a);
 
-#if _MSC_VER
+#if _MSC_VER && _CPPLIB_VER < 650
     // Test compatibility with Microsoft's implementation of std::allocator for some cases that
     // are undefined according to the ISO standard but permitted by Microsoft.
     TestSequence<std::deque <const int,Aci> >(a);

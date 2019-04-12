@@ -1,26 +1,27 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #ifndef __TBB_tbb_semaphore_H
 #define __TBB_tbb_semaphore_H
 
+#include <tbb/atomic.h>
 #include "tbb/tbb_stddef.h"
 
 #if _WIN32||_WIN64
@@ -55,7 +56,7 @@ public:
     ~semaphore() {CloseHandle( sem );}
     //! wait/acquire
     void P() {WaitForSingleObjectEx( sem, INFINITE, FALSE );}
-    //! post/release 
+    //! post/release
     void V() {ReleaseSemaphore( sem, 1, NULL );}
 private:
     HANDLE sem;
@@ -75,14 +76,14 @@ public:
         __TBB_ASSERT_EX( ret==err_none, NULL );
     }
     //! wait/acquire
-    void P() { 
+    void P() {
         int ret;
         do {
             ret = semaphore_wait( sem );
         } while( ret==KERN_ABORTED );
         __TBB_ASSERT( ret==KERN_SUCCESS, "semaphore_wait() failed" );
     }
-    //! post/release 
+    //! post/release
     void V() { semaphore_signal( sem ); }
 private:
     semaphore_t sem;
@@ -109,7 +110,7 @@ public:
         while( sem_wait( &sem )!=0 )
             __TBB_ASSERT( errno==EINTR, NULL );
     }
-    //! post/release 
+    //! post/release
     void V() { sem_post( &sem ); }
 private:
     sem_t sem;
@@ -133,7 +134,7 @@ public:
     ~binary_semaphore() { CloseHandle( my_sem ); }
     //! wait/acquire
     void P() { WaitForSingleObjectEx( my_sem, INFINITE, FALSE ); }
-    //! post/release 
+    //! post/release
     void V() { SetEvent( my_sem ); }
 private:
     HANDLE my_sem;
@@ -154,7 +155,7 @@ public:
     ~binary_semaphore();
     //! wait/acquire
     void P();
-    //! post/release 
+    //! post/release
     void V();
 private:
     srwl_or_handle my_sem;
@@ -175,14 +176,14 @@ public:
         __TBB_ASSERT_EX( ret==err_none, NULL );
     }
     //! wait/acquire
-    void P() { 
+    void P() {
         int ret;
         do {
             ret = semaphore_wait( my_sem );
         } while( ret==KERN_ABORTED );
         __TBB_ASSERT( ret==KERN_SUCCESS, "semaphore_wait() failed" );
     }
-    //! post/release 
+    //! post/release
     void V() { semaphore_signal( my_sem ); }
 private:
     semaphore_t my_sem;
@@ -191,6 +192,8 @@ private:
 
 #if __TBB_USE_FUTEX
 class binary_semaphore : no_copy {
+// The implementation is equivalent to the "Mutex, Take 3" one
+// in the paper "Futexes Are Tricky" by Ulrich Drepper
 public:
     //! ctor
     binary_semaphore() { my_sem = 1; }
@@ -202,23 +205,20 @@ public:
         if( (s = my_sem.compare_and_swap( 1, 0 ))!=0 ) {
             if( s!=2 )
                 s = my_sem.fetch_and_store( 2 );
-            while( s!=0 ) {
+            while( s!=0 ) { // This loop deals with spurious wakeup
                 futex_wait( &my_sem, 2 );
                 s = my_sem.fetch_and_store( 2 );
             }
         }
     }
-    //! post/release 
-    void V() { 
+    //! post/release
+    void V() {
         __TBB_ASSERT( my_sem>=1, "multiple V()'s in a row?" );
-        if( my_sem--!=1 ) {
-            //if old value was 2
-            my_sem = 0;
+        if( my_sem.fetch_and_store( 0 )==2 )
             futex_wakeup_one( &my_sem );
-        }
     }
 private:
-    atomic<int> my_sem;
+    atomic<int> my_sem; // 0 - open; 1 - closed, no waits; 2 - closed, possible waits
 };
 #else
 typedef uint32_t sem_count_t;
@@ -240,7 +240,7 @@ public:
         while( sem_wait( &my_sem )!=0 )
             __TBB_ASSERT( errno==EINTR, NULL );
     }
-    //! post/release 
+    //! post/release
     void V() { sem_post( &my_sem ); }
 private:
     sem_t my_sem;

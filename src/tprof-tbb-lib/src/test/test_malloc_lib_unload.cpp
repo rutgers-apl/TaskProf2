@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #if _USRDLL
@@ -29,7 +29,7 @@
 const char *globalCallMsg = "A TBB allocator function call is resolved into wrong implementation.";
 
 #if _WIN32||_WIN64
-// must be defined in DLL for linker to not drop the dependence on the DLL.
+// must be defined in DLL for linker to not drop the dependency on the DLL.
 extern "C" {
     extern __declspec(dllexport) void *scalable_malloc(size_t);
     extern __declspec(dllexport) void scalable_free (void *);
@@ -117,7 +117,9 @@ extern "C" size_t safer_scalable_msize (void *, size_t (*)(void*))
 // system headers that come from tbb_stddef.h
 #include "harness_defs.h"
 #include "tbb/tbb_stddef.h"
-#if __TBB_WIN8UI_SUPPORT || __TBB_SOURCE_DIRECTLY_INCLUDED
+#if __TBB_WIN8UI_SUPPORT || __TBB_SOURCE_DIRECTLY_INCLUDED || __TBB_MIC_OFFLOAD
+// The test does not work if dynamic load is unavailable.
+// For MIC offload, it fails because liboffload brings libiomp which observes and uses the fake scalable_* calls.
 #define HARNESS_SKIP_TEST 1
 #endif
 #define HARNESS_NO_PARSE_COMMAND_LINE 1
@@ -153,10 +155,10 @@ struct Run {
             REPORT("Can't load " MALLOCLIB_NAME1 " or " MALLOCLIB_NAME2 "\n");
             exit(1);
         }
-        (FunctionAddress&)malloc_ptr = GetAddress(lib, "scalable_malloc");
-        (FunctionAddress&)free_ptr = GetAddress(lib, "scalable_free");
-        (FunctionAddress&)aligned_malloc_ptr = GetAddress(lib, "scalable_aligned_malloc");
-        (FunctionAddress&)aligned_free_ptr = GetAddress(lib, "scalable_aligned_free");
+        GetAddress(lib, "scalable_malloc", malloc_ptr);
+        GetAddress(lib, "scalable_free", free_ptr);
+        GetAddress(lib, "scalable_aligned_malloc", aligned_malloc_ptr);
+        GetAddress(lib, "scalable_aligned_free", aligned_free_ptr);
 
         for (size_t sz = 1024; sz <= 10*1024 ; sz*=10) {
             void *p1 = aligned_malloc_ptr(sz, 16);
@@ -185,22 +187,26 @@ int TestMain () {
 
     // warm-up run
     NativeParallelFor( 1, Run() );
-    /* 1st call to GetMemoryUsage() allocate some memory,
-       but it seems memory consumption stabilized after this.
-     */
-    GetMemoryUsage();
-    std::size_t memory_in_use = GetMemoryUsage();
-    ASSERT(memory_in_use == GetMemoryUsage(),
-           "Memory consumption should not increase after 1st GetMemoryUsage() call");
 
-    // expect that memory consumption stabilized after several runs
-    for (i=0; i<3; i++) {
-        std::size_t memory_in_use = GetMemoryUsage();
-        for (int j=0; j<10; j++)
-            NativeParallelFor( 1, Run() );
-        memory_leak = GetMemoryUsage() - memory_in_use;
-        if (memory_leak == 0)  // possibly too strong?
-            break;
+    {
+      /* 1st call to GetMemoryUsage() allocate some memory,
+         but it seems memory consumption stabilized after this.
+      */
+      GetMemoryUsage();
+      std::size_t memory_in_use = GetMemoryUsage();
+      ASSERT(memory_in_use == GetMemoryUsage(),
+             "Memory consumption should not increase after 1st GetMemoryUsage() call");
+    }
+    {
+        // expect that memory consumption stabilized after several runs
+        for (i=0; i<3; i++) {
+            std::size_t memory_in_use = GetMemoryUsage();
+            for (int j=0; j<10; j++)
+                NativeParallelFor( 1, Run() );
+            memory_leak = GetMemoryUsage() - memory_in_use;
+            if (memory_leak == 0)  // possibly too strong?
+                break;
+        }
     }
     if(3==i) {
         // not stabilized, could be leak

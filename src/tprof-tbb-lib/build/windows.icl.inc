@@ -1,20 +1,20 @@
-# Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+# Copyright (c) 2005-2019 Intel Corporation
 #
-# This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-# you can redistribute it and/or modify it under the terms of the GNU General Public License
-# version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-# distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-# See  the GNU General Public License for more details.   You should have received a copy of
-# the  GNU General Public License along with Threading Building Blocks; if not, write to the
-# Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# As a special exception,  you may use this file  as part of a free software library without
-# restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-# functions from this file, or you compile this file and link it with other files to produce
-# an executable,  this file does not by itself cause the resulting executable to be covered
-# by the GNU General Public License. This exception does not however invalidate any other
-# reasons why the executable file might be covered by the GNU General Public License.
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+#
+#
 
 #------------------------------------------------------------------------------
 # Define compiler-specific variables.
@@ -33,18 +33,16 @@ cfg ?= release
 #------------------------------------------------------------------------------
 # Setting compiler flags.
 #------------------------------------------------------------------------------
-CPLUS = icl /nologo $(VCCOMPAT_FLAG)
+CPLUS ?= icl /nologo $(VCCOMPAT_FLAG)
 LINK_FLAGS = /link /nologo
 LIB_LINK_FLAGS= /link /nologo /DLL /MAP /DEBUG /fixed:no /INCREMENTAL:NO /DYNAMICBASE /NXCOMPAT
 
 ifeq ($(arch), ia32)
-	LIB_LINK_FLAGS += /SAFESEH
+    LIB_LINK_FLAGS += /SAFESEH
 endif
 
-
-# ICC 11.0 and higher support -std=c++0x
-ifeq (ok,$(call detect_js,/minversion icl 11))
-    CPP11_FLAGS = /Qstd=c++0x /D_TBB_CPP0X
+ifneq (,$(stdver))
+    CXX_STD_FLAGS = /Qstd=$(stdver)
 endif
 
 # ICC 12.0 and higher provide Intel(R) Cilk(TM) Plus
@@ -52,12 +50,17 @@ ifeq (ok,$(call detect_js,/minversion icl 12))
     CILK_AVAILABLE = yes
 endif
 
+# ICC 17.0.4 and higher provide support for VS2017
+ifeq (ok,$(call detect_js,/minversion icl 17 4))
+    VS2017_SUPPORT = yes
+endif
+
 ifeq ($(runtime), vc_mt)
     MS_CRT_KEY = /MT$(if $(findstring debug,$(cfg)),d)
 else
     MS_CRT_KEY = /MD$(if $(findstring debug,$(cfg)),d)
 endif
-EH_FLAGS = /EHsc /GR
+EH_FLAGS = $(if $(no_exceptions),/EHs-,/EHsc /GR)
 
 ifeq ($(cfg), release)
     CPLUS_FLAGS = $(MS_CRT_KEY) /O2 /Zi $(EH_FLAGS) /Zc:forScope /Zc:wchar_t /D__TBB_LIB_NAME=$(TBB.LIB)
@@ -79,10 +82,13 @@ OUTPUT_KEY = /Fe
 OUTPUTOBJ_KEY = /Fo
 WARNING_AS_ERROR_KEY = /WX
 WARNING_KEY = /W3
+WARNING_SUPPRESS = $(if $(no_exceptions),/wd583)
 DYLIB_KEY = /DLL
 EXPORT_KEY = /DEF:
 NODEFAULTLIB_KEY = /Zl
 NOINTRINSIC_KEY = /Oi-
+BIGOBJ_KEY = /bigobj
+INCLUDE_TEST_HEADERS = /FI$(tbb_root)/src/test/harness_preload.h
 
 
 ifneq (,$(codecov))
@@ -100,11 +106,7 @@ ifeq ($(runtime),vc8)
 endif
 
 
-C_FLAGS = $(CPLUS_FLAGS)
-
-ifneq (00,$(lambdas)$(cpp0x))
-    CXX_ONLY_FLAGS += $(CPP11_FLAGS)
-endif
+C_FLAGS = $(subst $(EH_FLAGS),,$(CPLUS_FLAGS))
 
 VCVERSION:=$(runtime)
 VCCOMPAT_FLAG ?= $(if $(findstring vc7.1, $(VCVERSION)),/Qvc7.1)
@@ -125,6 +127,14 @@ ifeq ($(VCCOMPAT_FLAG),)
 endif
 ifeq ($(VCCOMPAT_FLAG),)
         VCCOMPAT_FLAG := $(if $(findstring vc12, $(VCVERSION)),/Qvc12)
+endif
+ifeq ($(VCCOMPAT_FLAG),)
+    VCCOMPAT_FLAG := $(if $(findstring vc14, $(VCVERSION)),/Qvc14)
+    ifeq ($(VS2017_SUPPORT),yes)
+        ifneq (,$(findstring vc14.1, $(VCVERSION)))
+            VCCOMPAT_FLAG := /Qvc14.1
+        endif
+    endif
 endif
 ifeq ($(VCCOMPAT_FLAG),)
         $(error VC version not detected correctly: $(VCVERSION) )
@@ -158,7 +168,7 @@ endif
 #------------------------------------------------------------------------------
 # Setting tbbmalloc data.
 #------------------------------------------------------------------------------
-M_CPLUS_FLAGS = $(subst $(EH_FLAGS),/EHs-,$(CPLUS_FLAGS))
+M_CPLUS_FLAGS = $(CPLUS_FLAGS)
 #------------------------------------------------------------------------------
 # End of setting tbbmalloc data.
 #------------------------------------------------------------------------------

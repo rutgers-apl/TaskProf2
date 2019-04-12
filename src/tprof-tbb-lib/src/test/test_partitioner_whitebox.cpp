@@ -1,21 +1,21 @@
 /*
-    Copyright 2005-2014 Intel Corporation.  All Rights Reserved.
+    Copyright (c) 2005-2019 Intel Corporation
 
-    This file is part of Threading Building Blocks. Threading Building Blocks is free software;
-    you can redistribute it and/or modify it under the terms of the GNU General Public License
-    version 2  as  published  by  the  Free Software Foundation.  Threading Building Blocks is
-    distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See  the GNU General Public License for more details.   You should have received a copy of
-    the  GNU General Public License along with Threading Building Blocks; if not, write to the
-    Free Software Foundation, Inc.,  51 Franklin St,  Fifth Floor,  Boston,  MA 02110-1301 USA
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    As a special exception,  you may use this file  as part of a free software library without
-    restriction.  Specifically,  if other files instantiate templates  or use macros or inline
-    functions from this file, or you compile this file and link it with other files to produce
-    an executable,  this file does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however invalidate any other
-    reasons why the executable file might be covered by the GNU General Public License.
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
 */
 
 #include "harness_assert.h"
@@ -23,6 +23,7 @@
 
 using uniform_iterations_distribution::ParallelTestBody;
 
+template<typename Partitioner>
 class ParallelBody: public ParallelTestBody {
 public:
     ParallelBody(size_t parallel_group_thread_starting_index)
@@ -38,7 +39,7 @@ public:
             0,                                                              // above_threads_size_tolerance
             0,                                                              // below_threads_size_tolerance
             0,                                                              // between_min_max_ranges_tolerance
-            &ParallelTestBody::uniform_distribution_checker
+            &ParallelTestBody::uniform_distribution_checker                 // checker function for a particular test case
         };
         g_threadNums.local() = settings.thread_num;
         using namespace test_partitioner_utils::TestRanges;
@@ -47,16 +48,16 @@ public:
             settings.factors_array_len = sizeof(factors) / sizeof(factors[0]);
 
             settings.between_min_max_ranges_tolerance = 0; // it should be equal to zero for blocked_range
-            test<BlockedRange>(settings, factors);
+            test<BlockedRange, Partitioner>(settings, factors);
 
             settings.checker = &ParallelTestBody::nonuniform_distribution_checker;
-            test<InvertedProportionRange>(settings, factors);
-            test<RoundedDownRange>(settings, factors);
-            test<RoundedUpRange>(settings, factors);
+            test<InvertedProportionRange, Partitioner>(settings, factors);
+            test<RoundedDownRange, Partitioner>(settings, factors);
+            test<RoundedUpRange, Partitioner>(settings, factors);
 
-            test<Range1_2>(settings, factors);
-            test<Range1_999>(settings, factors);
-            test<Range999_1>(settings, factors);
+            test<Range1_2, Partitioner>(settings, factors);
+            test<Range1_999, Partitioner>(settings, factors);
+            test<Range999_1, Partitioner>(settings, factors);
         }
 
         {
@@ -66,16 +67,16 @@ public:
 
             settings.between_min_max_ranges_tolerance = 1; // it should be equal to one for blocked_range
             settings.checker = &ParallelTestBody::uniform_distribution_checker;
-            test<BlockedRange>(settings, factors);
+            test<BlockedRange, Partitioner>(settings, factors);
 
             settings.checker = &ParallelTestBody::nonuniform_distribution_checker;
-            test<InvertedProportionRange>(settings, factors);
-            test<RoundedDownRange>(settings, factors);
-            test<RoundedUpRange>(settings, factors);
+            test<InvertedProportionRange, Partitioner>(settings, factors);
+            test<RoundedDownRange, Partitioner>(settings, factors);
+            test<RoundedUpRange, Partitioner>(settings, factors);
 
-            test<Range1_2>(settings, factors);
-            test<Range1_999>(settings, factors);
-            test<Range999_1>(settings, factors);
+            test<Range1_2, Partitioner>(settings, factors);
+            test<Range1_999, Partitioner>(settings, factors);
+            test<Range999_1, Partitioner>(settings, factors);
         }
 
         {
@@ -84,36 +85,36 @@ public:
             settings.factors_array_len = sizeof(factors) / sizeof(factors[0]);
 
             settings.checker = &ParallelTestBody::uniform_distribution_checker;
-            test<BlockedRange>(settings, factors, &shifted_left_range_size_generator);
-            test<BlockedRange>(settings, factors, &shifted_right_range_size_generator);
+            test<BlockedRange, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<BlockedRange, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
             settings.checker = &ParallelTestBody::nonuniform_distribution_checker;
-            test<InvertedProportionRange>(settings, factors, &shifted_left_range_size_generator);
-            test<InvertedProportionRange>(settings, factors, &shifted_right_range_size_generator);
+            test<InvertedProportionRange, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<InvertedProportionRange, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
-            test<RoundedDownRange>(settings, factors, &shifted_left_range_size_generator);
-            test<RoundedDownRange>(settings, factors, &shifted_right_range_size_generator);
+            test<RoundedDownRange, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<RoundedDownRange, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
-            test<RoundedUpRange>(settings, factors, &shifted_left_range_size_generator);
-            test<RoundedUpRange>(settings, factors, &shifted_right_range_size_generator);
+            test<RoundedUpRange, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<RoundedUpRange, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
-            test<Range1_2>(settings, factors, &shifted_left_range_size_generator);
-            test<Range1_2>(settings, factors, &shifted_right_range_size_generator);
+            test<Range1_2, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<Range1_2, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
-            test<Range1_999>(settings, factors, &shifted_left_range_size_generator);
-            test<Range1_999>(settings, factors, &shifted_right_range_size_generator);
+            test<Range1_999, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<Range1_999, Partitioner>(settings, factors, &shifted_right_range_size_generator);
 
-            test<Range999_1>(settings, factors, &shifted_left_range_size_generator);
-            test<Range999_1>(settings, factors, &shifted_right_range_size_generator);
+            test<Range999_1, Partitioner>(settings, factors, &shifted_left_range_size_generator);
+            test<Range999_1, Partitioner>(settings, factors, &shifted_right_range_size_generator);
         }
 
         {
             settings.factors_array_len = 1;
             settings.between_min_max_ranges_tolerance = 1; // since range iterations are not divided without remainder
             settings.checker = &ParallelTestBody::uniform_distribution_checker;
-            test<ExactSplitRange, size_t>(settings, NULL, &max_range_size_generator);
+            test<ExactSplitRange, Partitioner, size_t>(settings, NULL, &max_range_size_generator);
             settings.range_begin = size_t(-1) - 10000;
-            test<ExactSplitRange, size_t>(settings, NULL, &max_range_size_generator);
+            test<ExactSplitRange, Partitioner, size_t>(settings, NULL, &max_range_size_generator);
         }
 
         {
@@ -121,28 +122,30 @@ public:
             settings.factors_array_len = 2 * unsigned(settings.thread_num);
             settings.checker = &ParallelTestBody::nonuniform_distribution_checker;
 
-            test<RoundedUpRange, size_t>(settings, NULL, &simple_size_generator);
-            test<RoundedDownRange, size_t>(settings, NULL, &simple_size_generator);
+            test<RoundedUpRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<RoundedDownRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
 
-            test<InvertedProportionRange, size_t>(settings, NULL, &simple_size_generator);
-            test<Range1_2, size_t>(settings, NULL, &simple_size_generator);
-            test<Range1_999, size_t>(settings, NULL, &simple_size_generator);
-            test<Range999_1, size_t>(settings, NULL, &simple_size_generator);
+            test<InvertedProportionRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range1_2, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range1_999, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range999_1, Partitioner, size_t>(settings, NULL, &simple_size_generator);
 
             settings.ensure_non_empty_size = false;
-            test<RoundedUpRange, size_t>(settings, NULL, &simple_size_generator);
-            test<RoundedDownRange, size_t>(settings, NULL, &simple_size_generator);
+            test<RoundedUpRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<RoundedDownRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
 
-            test<InvertedProportionRange, size_t>(settings, NULL, &simple_size_generator);
-            test<Range1_2, size_t>(settings, NULL, &simple_size_generator);
-            test<Range1_999, size_t>(settings, NULL, &simple_size_generator);
-            test<Range999_1, size_t>(settings, NULL, &simple_size_generator);
-
+            test<InvertedProportionRange, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range1_2, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range1_999, Partitioner, size_t>(settings, NULL, &simple_size_generator);
+            test<Range999_1, Partitioner, size_t>(settings, NULL, &simple_size_generator);
         }
     }
 };
 
 int TestMain() {
-    uniform_iterations_distribution::test<ParallelBody>();
+    uniform_iterations_distribution::test<ParallelBody <tbb::affinity_partitioner> >();
+    uniform_iterations_distribution::test<ParallelBody <tbb::static_partitioner> >();
+    uniform_iterations_distribution::test_task_affinity<tbb::affinity_partitioner>();
+    uniform_iterations_distribution::test_task_affinity<tbb::static_partitioner>();
     return Harness::Done;
 }
