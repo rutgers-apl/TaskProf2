@@ -30,7 +30,12 @@ private:
   void calculateRecurse_region(struct AFTask* node, size_t updated_region, unsigned int par_increase);
   void calculateWorkSpan_region(struct AFTask* node, size_t updated_region, unsigned int par_increase);
   void reset_work_span();
+  void reset_work();
   /***************************************************************/
+
+  void checkUpdateParentWorkSpan_whatif(size_t parent_index, size_t* num_processed, std::unordered_map<size_t, struct WorkSpanData>* workSpanMap);
+  void calculateRecurse_whatif(struct AFTask* node, std::unordered_map<size_t, struct WorkSpanData>* workSpanMap);
+  void calculateWorkSpan_whatif(struct AFTask* node);  
 
 
   /********** REPORT %AGE OF CRITICAL PATH LENGTH **************/
