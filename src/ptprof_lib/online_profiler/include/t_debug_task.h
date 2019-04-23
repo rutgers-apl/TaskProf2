@@ -36,7 +36,11 @@ namespace tbb {
       taskGraph->CaptureSetTaskId(get_cur_tid(), (static_cast<t_debug_task&>(t)).getTaskId(), true, __builtin_return_address(0), file, line);
     }
 
+    taskProf->TP_StartTaskOvhd(get_cur_tid());
+    
     task::spawn(t);
+
+    taskProf->TP_StopTaskOvhd(get_cur_tid());
 
     //taskGraph->setStepRegion(get_cur_tid(), file, line, true);
 
@@ -55,7 +59,11 @@ namespace tbb {
       taskGraph->CaptureSetTaskId(get_cur_tid(), (static_cast<t_debug_task&>(root)).getTaskId(), false, ret_address, file, line, par_for);
     }
 
+    //taskProf->TP_StartTaskOvhd(get_cur_tid());
+    
     task::spawn_root_and_wait(root);
+
+    //taskProf->TP_StopTaskOvhd(get_cur_tid());
 
     taskGraph->CaptureWait(get_cur_tid());
 

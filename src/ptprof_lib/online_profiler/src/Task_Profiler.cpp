@@ -57,6 +57,15 @@ size_t Task_Profiler::stop_n_get_count (THREADID threadid) {
 #endif
 }
 
+void Task_Profiler::TP_StartTaskOvhd(THREADID threadid) {
+  start_count(threadid);
+}
+
+void Task_Profiler::TP_StopTaskOvhd(THREADID threadid) {
+  size_t count = stop_n_get_count(threadid);
+  taskGraph->attribute_sched_ov_work(threadid, count);
+}
+
 void Task_Profiler::TP_CaptureExecute(THREADID threadid,const char* file, int line) {
   taskGraph->setStepRegion(threadid, file, line, true);
   start_count(threadid);

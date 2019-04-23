@@ -20,6 +20,9 @@ struct profiler_data {
   std::atomic<size_t> critical_child;
   std::atomic<size_t> parent_work;
 
+  std::atomic<size_t> t_overhead;
+  std::atomic<size_t> et_overhead;
+
   /**** CALCULATING %AGE OF CRITICAL PATH AND REGION ****/
   std::atomic<size_t> local_local_work;
   std::unordered_map<size_t, size_t> critical_call_sites;

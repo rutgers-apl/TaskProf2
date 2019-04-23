@@ -82,6 +82,9 @@ void AFTaskGraph::initialize_prof_data(struct AFTask* node) {
   node->t_prof.local_work = 0;
   node->t_prof.critical_child = 0;
 
+  //initialize tasking overhead
+  node->t_prof.t_overhead = 0;
+  node->t_prof.et_overhead = 0;
 
   //intializing RegionInfo
   node->t_prof.local_step.region_work = 0;
@@ -99,6 +102,13 @@ void AFTaskGraph::initialize_prof_data(struct AFTask* node) {
 
   //initialize data to compute percentage of critical work
   node->t_prof.local_local_work = 0;
+}
+
+//Called by task profiler after task spawn call. Updates the task overhead work
+void AFTaskGraph::attribute_sched_ov_work(THREADID threadid, size_t so_work) {
+  struct AFTask* cur_task  = cur_dpst_index[threadid].top();
+  cur_task->t_prof.t_overhead += so_work;
+  cur_task->t_prof.et_overhead += so_work;
 }
 
 //Called by task profiler after a step node completes. Update the work of cur node
@@ -466,9 +476,6 @@ void AFTaskGraph::setStepRegion(THREADID threadid, const char* file, int line, b
     cur_step_parent->step_region_end.line = line;
     cur_step_parent->step_region_end.filename.clear();
     cur_step_parent->step_region_end.filename = file;
-
-    //std::cout << "BEGIN: " << cur_step_parent->step_region_begin.filename << ":" << cur_step_parent->step_region_begin.line << std::endl;
-    //std::cout << "END: " << cur_step_parent->step_region_end.filename << ":" << cur_step_parent->step_region_end.line << std::endl;
   }
 }
 
@@ -478,6 +485,11 @@ void AFTaskGraph::setStepRegion(THREADID threadid, const char* file, int line, b
 void AFTaskGraph::calculateWorkSpan(struct AFTask* node) {
   struct AFTask* parent = node->parent;
   //assert(parent != NULL);
+
+  parent->t_prof.t_overhead += node->t_prof.t_overhead;
+  if (node->spawn_site == 0) {
+    parent->t_prof.et_overhead += node->t_prof.et_overhead;
+  }
   
   if (node->type == ASYNC) {
     // Calculate the span of the subtree with ASYNC node as root
@@ -594,7 +606,7 @@ bool AFTaskGraph::checkRecursiveCall(struct AFTask* node, size_t call_site) {
     return false;
   } else {
     struct AFTask* parent = node->parent;
-    if (parent->spawn_site == node->spawn_site) {
+    if (parent->spawn_site == call_site) {
       return true;
     } else {
       return checkRecursiveCall(parent, call_site);
@@ -608,18 +620,21 @@ bool AFTaskGraph::recursiveCall(struct AFTask* node) {
 
 void AFTaskGraph::aggregate_work_span(struct AFTask* node) {
   /* If node is a ASYNC node and is not a recursive call */
-  if (node->spawn_site != 0 && !recursiveCall(node)) {
-    // Needs to be synchronized.. use concurrent unordered map in tbb
+  if (node->spawn_site != 0) {
     if (workSpanMap.count(node->spawn_site) != 0) {
-      workSpanMap.at(node->spawn_site).work += node->t_prof.work;
-      workSpanMap.at(node->spawn_site).span += node->t_prof.critical_child;
+      workSpanMap.at(node->spawn_site).task_overhead += node->t_prof.et_overhead;
       workSpanMap.at(node->spawn_site).call_count++;
     } else {
       WorkSpanData wsdata;
-      wsdata.work = node->t_prof.work;
-      wsdata.span = node->t_prof.critical_child;
+      wsdata.task_overhead = node->t_prof.et_overhead;
       wsdata.call_count = 1;
       workSpanMap.insert(std::pair<size_t, struct WorkSpanData>(node->spawn_site, wsdata));
+    }
+      
+    if (!recursiveCall(node)) {
+      // Needs to be synchronized.. use concurrent unordered map in tbb
+      workSpanMap.at(node->spawn_site).work += node->t_prof.work;
+      workSpanMap.at(node->spawn_site).span += node->t_prof.critical_child;
     }
   }
 }
@@ -628,13 +643,9 @@ void AFTaskGraph::FinalizeAndGenerateProfile() {
 #if 0
   // Check if backing store is empty for all threads except thread
   // 0. Thread 0 should have just one element.
-  //print_ll(dpst_ll[0]);
-  //std::cout << "***************\n";
   assert(dpst_ll[0]->next->next == NULL);
   assert(cur_dpst_index[0].size() == 1);
   for (unsigned int i = 1; i < NUM_THREADS; i++) {
-    //print_ll(dpst_ll[i]);
-    //std::cout << "***************\n";
     assert(dpst_ll[i]->next == NULL);
     assert(cur_dpst_index[i].empty());
   }
@@ -657,14 +668,15 @@ void AFTaskGraph::FinalizeAndGenerateProfile() {
   } else {
     report.open("parallelism_profile.csv");
   }
-  report << "Source file,Line number,Work,Span,Parallelism,Percent critical work" << std::endl;
+  report << "Source file,Line number,Work,Span,Parallelism,Percent critical work, Percent task overhead" << std::endl;
 
   report << "main" << ","
 	 << 0 << ","
 	 << head->t_prof.work << ","
 	 << head->t_prof.critical_child << ","
 	 << (double)head->t_prof.work/(double)head->t_prof.critical_child << ","
-	 << ((double)head->t_prof.local_local_work/(double)head->t_prof.critical_child)*100.00
+	 << ((double)head->t_prof.local_local_work/(double)head->t_prof.critical_child)*100.00 << ","
+	 << ((double)head->t_prof.et_overhead/(double)head->t_prof.t_overhead)*100.00
 	 << std::endl;
 
   std::unordered_map<size_t,size_t> head_cs_data = head->t_prof.critical_call_sites;
@@ -684,7 +696,8 @@ void AFTaskGraph::FinalizeAndGenerateProfile() {
 	     << workspanData.work << ","
 	     << workspanData.span << ","
 	     << (double)workspanData.work/(double)workspanData.span << ","
-	     << ((double)cs_critical_work/(double)head->t_prof.critical_child)*100.00
+	     << ((double)cs_critical_work/(double)head->t_prof.critical_child)*100.00 << ","
+	     << ((double)workspanData.task_overhead/(double)head->t_prof.t_overhead)*100.00
 	     << std::endl;
     } else { // spawn site not on critical path
       report << callsiteData.cs_filename << ","
@@ -692,11 +705,16 @@ void AFTaskGraph::FinalizeAndGenerateProfile() {
 	     << workspanData.work << ","
 	     << workspanData.span << ","
 	     << (double)workspanData.work/(double)workspanData.span << ","
-	     << 0
+	     << 0 << ","
+	     << ((double)workspanData.task_overhead/(double)head->t_prof.t_overhead)*100.00
 	     << std::endl;
     }
   }
   //assert(check_critical_work == head->t_prof.critical_child);
+
+  report << std::endl
+	 << "Tasking Overhead: " << ((double)head->t_prof.t_overhead/(double)head->t_prof.work)*100.00
+	 << std::endl;
 
   report.close();
 

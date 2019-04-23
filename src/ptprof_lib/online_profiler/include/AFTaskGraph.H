@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "tbb/concurrent_unordered_map.h"
 
@@ -81,6 +82,8 @@ public:
   void decrement_act_child(THREADID threadid);
 
   void setStepRegion(THREADID threadid, const char* file, int line, bool start);
+
+  void attribute_sched_ov_work(THREADID threadid, size_t so_work);
   
   void FinalizeAndGenerateProfile();
 };

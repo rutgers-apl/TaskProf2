@@ -33,8 +33,13 @@ public:
   void TP_CaptureWait_Exit(THREADID threadid,const char* file, int line);
   void TP_CaptureSpawn_Entry(THREADID threadid,const char* file, int line);
   void TP_CaptureSpawn_Exit(THREADID threadid,const char* file, int line);
+
+  void TP_StartTaskOvhd(THREADID threadid);
+  void TP_StopTaskOvhd(THREADID threadid);
+  
   void TP_CaptureBeginOptimize(THREADID threadid, const char* file, int line, void* return_address);
   void TP_CaptureEndOptimize(THREADID threadid, const char* file, int line, void* return_address);
+  
   void Fini(const char* file, int line);
 };
 

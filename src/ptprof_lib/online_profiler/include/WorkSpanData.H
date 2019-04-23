@@ -4,6 +4,7 @@
 struct WorkSpanData {
   size_t work;
   size_t span;
+  size_t task_overhead;
   size_t call_count;
 };
 
